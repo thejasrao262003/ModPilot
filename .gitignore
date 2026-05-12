@@ -1,0 +1,56 @@
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+.venv/
+venv/
+
+# Node
+node_modules/
+*.log
+.eslintcache
+.turbo/
+
+# Devvit
+.devvit/
+devvit-app/dist/
+
+# Build artifacts
+*.tsbuildinfo
+.next/
+.cache/
+
+# Eval outputs
+eval/runs/
+eval/results/*.json
+!eval/baseline.json
+
+# Local databases
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log

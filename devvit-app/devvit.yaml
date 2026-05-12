@@ -1,0 +1,38 @@
+# Devvit app manifest — ModPilot
+# Detail: docs/03-Devvit.md
+name: modpilot
+version: 0.0.1
+
+# Permissions required for the moderation use case.
+# Each scope justified in docs/03-Devvit.md.
+permissions:
+  reddit:
+    asUser:
+      - SUBMIT_POST
+      - SUBMIT_COMMENT
+    asApp:
+      - MODERATE          # remove/approve comments and posts
+      - READ              # read thread context, user profiles
+      - MODNOTE           # read and write mod notes
+  http:
+    enabled: true
+    domains:
+      # Engine endpoint — set per-env via Devvit secrets
+      - api.modpilot.example  # TODO(F-0.5): replace with real Fly.io domain
+  redis:
+    enabled: true       # Devvit KV for dedup, wizard state, cached verdicts
+
+# Triggers — full spec in docs/Specs.md §6.1
+triggers:
+  - CommentReport
+  - PostReport
+  - ModAction
+  - AppInstall
+  - AppUpgrade
+
+# Scheduled jobs — full spec in docs/Specs.md §6.3
+scheduler:
+  - name: priority-rollup
+    cron: "*/5 * * * *"
+  - name: feedback-batch
+    cron: "0 4 * * *"   # 04:00 UTC nightly
