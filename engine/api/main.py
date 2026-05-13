@@ -22,12 +22,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(level=settings.log_level, env=settings.env)
     logger = get_logger(__name__)
+    settings.validate_for_runtime()  # F-0.7 — fail-closed in prod when keys missing
     logger.info(
         "engine.startup",
         env=settings.env,
         model_reasoner=settings.model_reasoner,
         model_summarizer=settings.model_summarizer,
         hmac_enforced=settings.hmac_enforced,
+        gemini_configured=bool(settings.gemini_api_key),
     )
 
     # F-0.6: probe Postgres + Redis at startup. Failure here aborts boot

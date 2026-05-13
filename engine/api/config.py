@@ -51,6 +51,27 @@ class Settings(BaseSettings):
         """In dev with no secret set, middleware logs and lets requests through."""
         return bool(self.engine_shared_secret) and not self.is_dev
 
+    def validate_for_runtime(self) -> None:
+        """Refuse to boot in prod when load-bearing secrets are missing (F-0.7).
+
+        In dev we warn but proceed — keeps the local loop fast. In staging/prod
+        the engine fail-closes per docs/Specs.md §13.1 rather than serving
+        verdicts against an unconfigured LLM provider.
+        """
+        if not self.gemini_api_key:
+            if self.is_dev:
+                # Dev: deferred — the GeminiClient itself raises when actually
+                # instantiated, so health probes and unit tests still pass.
+                return
+            raise RuntimeError(
+                f"GEMINI_API_KEY is required in env={self.env}. Set it in engine/.env "
+                "or via deployment secrets. See docs/13-Infra.md."
+            )
+        if not self.is_dev and not self.engine_shared_secret:
+            raise RuntimeError(
+                f"ENGINE_SHARED_SECRET is required in env={self.env} (HMAC enforcement)."
+            )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

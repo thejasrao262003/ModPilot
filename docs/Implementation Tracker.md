@@ -12,7 +12,7 @@
 
 | Phase | Window | Goal | Status |
 |---|---|---|---|
-| 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ◐ (F-0.2, F-0.3, F-0.4, F-0.5, F-0.6 ✅) |
+| 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ◐ (F-0.2, F-0.3, F-0.4, F-0.5, F-0.6, F-0.7, F-0.8 ✅) |
 | 1 — End-to-end stub | Days 3–4 | Trigger → stub Engine → fake Verdict Card | ☐ |
 | 2 — Real Engine MVP | Days 5–7 | 2 tools + Reasoner + Calibrator, real verdicts | ☐ |
 | 3 — Full investigation | Days 8–10 | All 5 tools + memory + cold-start + personalities | ☐ |
@@ -69,15 +69,18 @@ Goal: Everything green-field needed *before* writing investigation logic.
 - **Deps:** F-0.5.
 - **Done 2026-05-13:** Root `docker-compose.yml` brings up `modpilot-postgres` (postgres:16-alpine, healthcheck via `pg_isready`) and `modpilot-redis` (redis:7-alpine with AOF + LRU eviction). `make services-up` polls compose-ps until both containers report healthy. `engine/store/connections.py` opens an async SQLAlchemy + asyncpg engine + an `aioredis` client; the FastAPI lifespan probes both at boot and logs `db.connected driver=asyncpg server='PostgreSQL 16.13'` and `redis.connected pong=True url=redis://localhost:6379/0`. Failure during open aborts startup (fail-closed per [10-ReliabilityAndSafety.md](10-ReliabilityAndSafety.md)). `ruff` + `mypy --strict` + 9 tests all clean.
 
-### F-0.7 — Secrets & env wired ☐
+### F-0.7 — Secrets & env wired ✅
 - **Spec:** [13-Infra.md](13-Infra.md), [CLAUDE.md](../CLAUDE.md) Commands section
 - **Acceptance:** `.env.example` checked in with `GEMINI_API_KEY`, `MODEL_REASONER=gemini-2.5-pro`, `MODEL_SUMMARIZER=gemini-2.5-flash`, DB urls. Engine refuses to start if `GEMINI_API_KEY` is missing.
 - **Deps:** F-0.5.
+- **Done 2026-05-13:** `Settings.validate_for_runtime()` enforces secret presence at lifespan startup: in `env=production` or `env=staging`, missing `GEMINI_API_KEY` raises `RuntimeError` and aborts boot; missing `ENGINE_SHARED_SECRET` same. In `env=development` the check is deferred to first LLM call so unit tests + `/health` probes still work. Lifespan now logs `gemini_configured=<bool>` alongside startup info.
 
-### F-0.8 — Gemini client smoke test ☐
+### F-0.8 — Gemini client smoke test ✅
 - **Spec:** [06-AILayer.md §3.2](06-AILayer.md), [Specs.md §8](Specs.md)
 - **Acceptance:** `engine/llm/gemini.py` implements `LLMClient`. A pytest hits Gemini 2.5 Flash with a fixed prompt and asserts a non-empty response within 3s. Skipped in CI by default; enabled with env flag.
 - **Deps:** F-0.7.
+- **Done 2026-05-13:** `engine/llm/client.py` defines the `LLMClient` Protocol per [Specs.md §8.2](Specs.md) with `Role` (`StrEnum`), `Message`, `LLMResponse`. `engine/llm/gemini.py` implements it on `google-genai`'s async API, with per-model price table (Pro $1.25/$10 per 1M; Flash $0.075/$0.30 per 1M), token-count + latency + cost on every response, structured logs (`llm.call.started`/`.succeeded`/`.timeout`), and an optional `thinking_budget` parameter for fine-grained control. Live tests gated on `ENABLE_LIVE_LLM_TESTS=true` — both Flash (thinking_budget=0, "What color is the sky?" → "Blue") and Pro (thinking_budget=128, "Reply with: pong" → contains "pong") pass against the real API in ~5s combined.
+- **Production insight surfaced live:** `gemini-2.5-pro` is **thinking-only** — `thinking_budget=0` returns HTTP 400. Reasoner calls must allocate budget for thinking + output (~256+ recommended). `gemini-2.5-flash` allows disabling thinking and we should default Flash summarizer calls to `thinking_budget=0`. Captured in module docstring of `gemini.py`.
 
 ### F-0.9 — CI gates ☐
 - **Spec:** [14-Engineering.md §6](14-Engineering.md)
