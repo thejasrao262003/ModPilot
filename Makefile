@@ -13,10 +13,20 @@ help:
 	@echo "  make clean            Remove caches, build artifacts"
 
 services-up:
-	@echo "TODO(F-0.6): docker-compose up for Postgres + Redis"
+	docker compose up -d
+	@echo "Waiting for Postgres + Redis healthchecks..."
+	@until docker compose ps --format json | grep -q '"Health":"healthy"' && \
+	       [ $$(docker compose ps --format json | grep -c '"Health":"healthy"') -ge 2 ]; do \
+		sleep 1; \
+	done
+	@echo "✓ Postgres on localhost:5432  ·  Redis on localhost:6379"
 
 services-down:
-	@echo "TODO(F-0.6): docker-compose down"
+	docker compose down
+
+services-reset:
+	docker compose down -v
+	@echo "✓ Volumes removed."
 
 engine-dev:
 	cd engine && uv run uvicorn api.main:app --reload --port 8000

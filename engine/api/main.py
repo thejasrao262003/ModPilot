@@ -14,10 +14,11 @@ from api.config import get_settings
 from api.errors import register_error_handlers
 from api.middleware import CorrelationIdMiddleware, HmacMiddleware
 from observability.logging import configure_logging, get_logger
+from store.connections import close_postgres, close_redis, open_postgres, open_redis
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(level=settings.log_level, env=settings.env)
     logger = get_logger(__name__)
@@ -28,9 +29,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         model_summarizer=settings.model_summarizer,
         hmac_enforced=settings.hmac_enforced,
     )
-    # TODO(F-0.6): connect to Postgres + Redis here, log `db.connected`.
-    yield
-    logger.info("engine.shutdown")
+
+    # F-0.6: probe Postgres + Redis at startup. Failure here aborts boot
+    # in production (per docs/Specs.md §13.1 fail-closed) so we never serve
+    # /investigate calls against unreachable stores.
+    app.state.pg = await open_postgres(settings)
+    app.state.redis = await open_redis(settings)
+    try:
+        yield
+    finally:
+        await close_redis(app.state.redis)
+        await close_postgres(app.state.pg)
+        logger.info("engine.shutdown")
 
 
 app = FastAPI(

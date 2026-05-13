@@ -1,0 +1,46 @@
+# Local services for the Investigation Engine.
+# Spec: docs/13-Infra.md, docs/Specs.md §5
+#
+# Bring up:    make services-up
+# Bring down:  make services-down
+# Reset:       docker compose down -v   (drops volumes)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: modpilot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: modpilot
+      POSTGRES_PASSWORD: modpilot
+      POSTGRES_DB: modpilot
+      # Match container locale to UTF-8 so JSONB + text fields behave.
+      LANG: en_US.utf8
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U modpilot -d modpilot"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: modpilot-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_data:
+  redis_data:

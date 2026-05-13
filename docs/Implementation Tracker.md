@@ -12,7 +12,7 @@
 
 | Phase | Window | Goal | Status |
 |---|---|---|---|
-| 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ◐ (F-0.2, F-0.3, F-0.4, F-0.5 ✅) |
+| 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ◐ (F-0.2, F-0.3, F-0.4, F-0.5, F-0.6 ✅) |
 | 1 — End-to-end stub | Days 3–4 | Trigger → stub Engine → fake Verdict Card | ☐ |
 | 2 — Real Engine MVP | Days 5–7 | 2 tools + Reasoner + Calibrator, real verdicts | ☐ |
 | 3 — Full investigation | Days 8–10 | All 5 tools + memory + cold-start + personalities | ☐ |
@@ -63,10 +63,11 @@ Goal: Everything green-field needed *before* writing investigation logic.
 - **Deps:** F-0.3.
 - **Done 2026-05-13:** `api/config.py` (pydantic-settings), `api/errors.py` (envelope + 7 error codes per Specs §10.3), `api/middleware.py` (CorrelationId + HMAC-SHA256 with 5-minute skew window, permissive in dev), `observability/logging.py` (structlog, JSON in prod, console in dev). 9 tests cover health, correlation-id roundtrip, HMAC permissive/strict/skew, error envelope. `ruff check` clean, `mypy --strict` clean.
 
-### F-0.6 — Local services via docker-compose ☐
+### F-0.6 — Local services via docker-compose ✅
 - **Spec:** [13-Infra.md](13-Infra.md)
 - **Acceptance:** `make services-up` starts Postgres + Redis. Engine connects on boot and logs `db.connected` + `redis.connected`.
 - **Deps:** F-0.5.
+- **Done 2026-05-13:** Root `docker-compose.yml` brings up `modpilot-postgres` (postgres:16-alpine, healthcheck via `pg_isready`) and `modpilot-redis` (redis:7-alpine with AOF + LRU eviction). `make services-up` polls compose-ps until both containers report healthy. `engine/store/connections.py` opens an async SQLAlchemy + asyncpg engine + an `aioredis` client; the FastAPI lifespan probes both at boot and logs `db.connected driver=asyncpg server='PostgreSQL 16.13'` and `redis.connected pong=True url=redis://localhost:6379/0`. Failure during open aborts startup (fail-closed per [10-ReliabilityAndSafety.md](10-ReliabilityAndSafety.md)). `ruff` + `mypy --strict` + 9 tests all clean.
 
 ### F-0.7 — Secrets & env wired ☐
 - **Spec:** [13-Infra.md](13-Infra.md), [CLAUDE.md](../CLAUDE.md) Commands section
