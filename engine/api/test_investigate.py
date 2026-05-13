@@ -1,18 +1,112 @@
-"""Tests for the stub /investigate endpoint (S-1.3).
+"""Tests for the /investigate endpoint (E-2.11).
 
-Verifies the request/response wire schemas + that the canned verdict matches
-the mockup data (single source of truth for Verdict Card / Timeline UI work).
+Verifies the request/response wire schemas, validation, and that the
+endpoint calls the pipeline and returns the verdict.
 """
+
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock, MagicMock, patch
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
-from api.schemas import InvestigateResponse, Verdict
+from api.pipeline import PipelineResult
+from api.schemas import (
+    ConfidenceBreakdown,
+    EvidenceRow,
+    InvestigateResponse,
+    TimelineStep,
+    Verdict,
+)
+from orchestrator.tools import EvidenceAccumulator, ToolResult
+
+
+def _fake_accumulator() -> EvidenceAccumulator:
+    acc = EvidenceAccumulator()
+    acc.append(
+        ToolResult(
+            tool="policy_match",
+            status="success",
+            summary="matched rule 2",
+            latency_ms=10,
+            detail={},
+        )
+    )
+    return acc
+
+
+def _fake_verdict(correlation_id: str = "test-correlation-001") -> Verdict:
+    return Verdict(
+        correlation_id=correlation_id,
+        tier="STANDARD",
+        risk_tier="HIGH",
+        recommendation="REMOVE",
+        calibrated_confidence=0.82,
+        rationale="The content matches rule 2 with high confidence [ev-1].",
+        top_evidence=[
+            EvidenceRow(id="ev-1", summary="matched rule 2", tool="policy_match"),
+        ],
+        timeline=[
+            TimelineStep(
+                tool="policy_match",
+                verb="Matched against rules",
+                status="success",
+                latency_ms=10,
+                evidence_ids=["ev-1"],
+            ),
+        ],
+        confidence_breakdown=ConfidenceBreakdown(
+            llm_self_report=0.88,
+            evidence_convergence=0.75,
+            subreddit_accuracy=0.5,
+            rule_match_strength=0.91,
+        ),
+        model_reasoner="gemini-2.5-pro",
+        model_summarizer="",
+        cost_usd=0.002,
+        latency_ms=1500,
+        validation_flag=False,
+        degraded=False,
+        cold_start=True,
+    )
+
+
+def _fake_pipeline_result(
+    correlation_id: str = "test-correlation-001",
+) -> PipelineResult:
+    return PipelineResult(
+        verdict=_fake_verdict(correlation_id),
+        accumulator=_fake_accumulator(),
+        tier="STANDARD",
+        input_tokens=500,
+        output_tokens=120,
+        cost_usd=0.002,
+        model_reasoner="gemini-2.5-pro",
+        validation_flag=False,
+        cold_start=True,
+    )
+
+
+@asynccontextmanager
+async def _mock_session(_factory: object = None) -> AsyncIterator[MagicMock]:
+    """Yield a mock session that returns None for get_subreddit_profile."""
+    yield MagicMock()
 
 
 @pytest.fixture
 def client() -> TestClient:
+    """TestClient with app.state populated to satisfy endpoint reads."""
+    # Set state attributes that the endpoint reads before calling the pipeline.
+    app.state.orchestrator = MagicMock()
+    app.state.llm = MagicMock()
+    app.state.pg_sessions = MagicMock()
     return TestClient(app)
 
 
@@ -34,102 +128,100 @@ def _valid_request() -> dict[str, object]:
     }
 
 
-def test_investigate_returns_canned_high_conf_remove(client: TestClient) -> None:
-    r = client.post("/investigate", json=_valid_request())
-    assert r.status_code == 200, r.text
+class TestInvestigateEndpoint:
+    def test_returns_200_with_verdict(self, client: TestClient) -> None:
+        mock_pipeline = AsyncMock(return_value=_fake_pipeline_result())
+        with (
+            patch("api.main.run_investigation", mock_pipeline),
+            patch("api.main._persist", new_callable=AsyncMock),
+            patch("api.main.with_session", _mock_session),
+            patch("api.main.get_subreddit_profile", new_callable=AsyncMock, return_value=None),
+        ):
+            r = client.post("/investigate", json=_valid_request())
+        assert r.status_code == 200
+        body = InvestigateResponse.model_validate(r.json())
+        assert body.data.correlation_id == "test-correlation-001"
+        assert body.data.recommendation == "REMOVE"
 
-    body = InvestigateResponse.model_validate(r.json())
-    v: Verdict = body.data
+    def test_verdict_fields_propagated(self, client: TestClient) -> None:
+        mock_pipeline = AsyncMock(return_value=_fake_pipeline_result())
+        with (
+            patch("api.main.run_investigation", mock_pipeline),
+            patch("api.main._persist", new_callable=AsyncMock),
+            patch("api.main.with_session", _mock_session),
+            patch("api.main.get_subreddit_profile", new_callable=AsyncMock, return_value=None),
+        ):
+            r = client.post("/investigate", json=_valid_request())
+        v = InvestigateResponse.model_validate(r.json()).data
+        assert v.tier == "STANDARD"
+        assert v.risk_tier == "HIGH"
+        assert v.calibrated_confidence == 0.82
+        assert v.model_reasoner == "gemini-2.5-pro"
 
-    assert v.correlation_id == "test-correlation-001"
-    assert v.tier == "DEEP"
-    assert v.risk_tier == "HIGH"
-    assert v.recommendation == "REMOVE"
-    assert v.calibrated_confidence == 0.92
-    assert "[ev-2]" in v.rationale and "[ev-4]" in v.rationale and "[ev-5]" in v.rationale
-    assert v.model_reasoner == "gemini-2.5-pro"
-    assert v.model_summarizer == "gemini-2.5-flash"
+    def test_pipeline_called_with_request(self, client: TestClient) -> None:
+        mock_pipeline = AsyncMock(return_value=_fake_pipeline_result())
+        with (
+            patch("api.main.run_investigation", mock_pipeline),
+            patch("api.main._persist", new_callable=AsyncMock),
+            patch("api.main.with_session", _mock_session),
+            patch("api.main.get_subreddit_profile", new_callable=AsyncMock, return_value=None),
+        ):
+            client.post("/investigate", json=_valid_request())
+        mock_pipeline.assert_called_once()
+        call_kwargs = mock_pipeline.call_args.kwargs
+        assert call_kwargs["req"].correlation_id == "test-correlation-001"
+        assert call_kwargs["personality"] == "balanced"  # default cold-start
 
-
-def test_canned_verdict_has_three_top_evidence_rows(client: TestClient) -> None:
-    body = InvestigateResponse.model_validate(
-        client.post("/investigate", json=_valid_request()).json()
-    )
-    assert len(body.data.top_evidence) == 3
-    assert {row.id for row in body.data.top_evidence} == {"ev-2", "ev-4", "ev-5"}
-    # Every cited evidence-id in the rationale resolves to top_evidence — citation contract sanity.
-    cited_ids = {f"ev-{n}" for n in ("2", "4", "5")}
-    for ev_id in cited_ids:
-        assert any(row.id == ev_id for row in body.data.top_evidence)
-
-
-def test_canned_verdict_timeline_matches_mockup(client: TestClient) -> None:
-    body = InvestigateResponse.model_validate(
-        client.post("/investigate", json=_valid_request()).json()
-    )
-    timeline = body.data.timeline
-    assert len(timeline) == 4
-    assert [step.tool for step in timeline] == [
-        "policy_match",
-        "report_velocity",
-        "user_history",
-        "thread_context",
-    ]
-    assert [step.verb for step in timeline] == [
-        "Matched against rules",
-        "Checked report velocity",
-        "Pulled author history",
-        "Read thread context",
-    ]
-    assert all(step.status == "success" for step in timeline)
-
-
-def test_confidence_breakdown_in_valid_range(client: TestClient) -> None:
-    body = InvestigateResponse.model_validate(
-        client.post("/investigate", json=_valid_request()).json()
-    )
-    cb = body.data.confidence_breakdown
-    for value in (
-        cb.llm_self_report,
-        cb.evidence_convergence,
-        cb.subreddit_accuracy,
-        cb.rule_match_strength,
-    ):
-        assert 0.0 <= value <= 1.0
+    def test_persist_called(self, client: TestClient) -> None:
+        mock_pipeline = AsyncMock(return_value=_fake_pipeline_result())
+        mock_persist = AsyncMock()
+        with (
+            patch("api.main.run_investigation", mock_pipeline),
+            patch("api.main._persist", mock_persist),
+            patch("api.main.with_session", _mock_session),
+            patch("api.main.get_subreddit_profile", new_callable=AsyncMock, return_value=None),
+        ):
+            client.post("/investigate", json=_valid_request())
+        mock_persist.assert_called_once()
 
 
-def test_investigate_rejects_malformed_subreddit_id(client: TestClient) -> None:
-    payload = _valid_request()
-    payload["subreddit_id"] = "not_a_subreddit"  # must match `^t5_`
-    r = client.post("/investigate", json=payload)
-    assert r.status_code == 400
-    body = r.json()
-    assert body["ok"] is False
-    assert body["error"]["code"] == "BAD_REQUEST"
-    assert "subreddit_id" in body["error"]["message"]
+class TestInvestigateValidation:
+    def test_rejects_malformed_subreddit_id(self, client: TestClient) -> None:
+        payload = _valid_request()
+        payload["subreddit_id"] = "not_a_subreddit"
+        r = client.post("/investigate", json=payload)
+        assert r.status_code == 400
+        body = r.json()
+        assert body["ok"] is False
+        assert body["error"]["code"] == "BAD_REQUEST"
+        assert "subreddit_id" in body["error"]["message"]
 
+    def test_rejects_missing_correlation_id(self, client: TestClient) -> None:
+        payload = _valid_request()
+        del payload["correlation_id"]
+        r = client.post("/investigate", json=payload)
+        assert r.status_code == 400
 
-def test_investigate_rejects_missing_correlation_id(client: TestClient) -> None:
-    payload = _valid_request()
-    del payload["correlation_id"]
-    r = client.post("/investigate", json=payload)
-    assert r.status_code == 400
+    def test_rejects_negative_reporter_count(self, client: TestClient) -> None:
+        payload = _valid_request()
+        payload["report"] = {"reasons": [], "reporter_count": -1}
+        r = client.post("/investigate", json=payload)
+        assert r.status_code == 400
 
-
-def test_investigate_rejects_negative_reporter_count(client: TestClient) -> None:
-    payload = _valid_request()
-    payload["report"] = {"reasons": [], "reporter_count": -1}
-    r = client.post("/investigate", json=payload)
-    assert r.status_code == 400
-
-
-def test_investigate_accepts_post_target(client: TestClient) -> None:
-    payload = _valid_request()
-    payload["target"] = {
-        "kind": "post",
-        "id": "t3_1tbrryu",
-        "body": "Hi all",
-        "author": "t2_ewyhkkhu",
-    }
-    r = client.post("/investigate", json=payload)
-    assert r.status_code == 200
+    def test_accepts_post_target(self, client: TestClient) -> None:
+        mock_pipeline = AsyncMock(return_value=_fake_pipeline_result())
+        with (
+            patch("api.main.run_investigation", mock_pipeline),
+            patch("api.main._persist", new_callable=AsyncMock),
+            patch("api.main.with_session", _mock_session),
+            patch("api.main.get_subreddit_profile", new_callable=AsyncMock, return_value=None),
+        ):
+            payload = _valid_request()
+            payload["target"] = {
+                "kind": "post",
+                "id": "t3_1tbrryu",
+                "body": "Hi all",
+                "author": "t2_ewyhkkhu",
+            }
+            r = client.post("/investigate", json=payload)
+        assert r.status_code == 200

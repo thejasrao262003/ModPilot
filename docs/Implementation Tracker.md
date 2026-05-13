@@ -228,15 +228,17 @@ Goal: Replace the stub with real investigation logic — two tools, a real Reaso
 - **Deps:** E-2.7.
 - **Done 2026-05-13:** `engine/orchestrator/calibrator.py` — pure-function `calibrate(CalibrationInputs) -> CalibrationResult`. 4 weighted signals (llm 0.25, evidence 0.30, accuracy 0.20, rule_match 0.25) with LLM overconfidence discount (compresses toward 0.5 by factor 0.4). 3 conditional demotions: validation_failed (×0.6), partial (×0.8), cold_start (×0.85) — stackable. Tier: HIGH≥0.85, MEDIUM≥0.60, LOW<0.60. `compute_evidence_convergence()` helper. `CalibrationResult` frozen, carries breakdown for UI audit. 25 tests — **100% statement + branch coverage**. Lint + mypy --strict clean.
 
-### E-2.11 — Wire real `/investigate` ☐
+### E-2.11 — Wire real `/investigate` ✅
 - **Spec:** [Specs.md §10.2](Specs.md)
 - **Acceptance:** Endpoint runs full pipeline: Strategy → Orchestrator → Reasoner → Validator → Calibrator. Returns response matching schema. Persists `investigation` + `evidence` rows.
 - **Deps:** E-2.10, E-2.9.
+- **Done 2026-05-13:** `engine/api/pipeline.py` — `run_investigation()` full pipeline function with DI. Strategy selection → Orchestrator (tool execution) → Reasoner with retry (first attempt + corrective retry on validation failure) → Citation validator → Confidence Calibrator → Verdict assembly. `_fallback_output()` degraded path when Reasoner fails twice. Helpers: `_extract_rule_match_strength()`, `_extract_evidence_signals()`, `_build_timeline()`, `_build_top_evidence()`. `PipelineResult` frozen dataclass. `engine/api/main.py` — endpoint wired with lifespan-managed ToolRegistry + Orchestrator + GeminiClient. Fetches subreddit profile from Postgres (cold-start defaults if missing). Persists investigation + evidence + verdict rows via `start_investigation` → `append_evidence` → `finalize_investigation`. 31 pipeline tests + 8 endpoint tests (39 new). Total suite: 261 passed. Lint + mypy --strict clean.
 
-### E-2.12 — Rule-based fallback verdict ☐
+### E-2.12 — Rule-based fallback verdict ✅
 - **Spec:** [Specs.md §13.1](Specs.md), [10-ReliabilityAndSafety.md](10-ReliabilityAndSafety.md)
 - **Acceptance:** When Reasoner fails twice or validator rejects twice, returns degraded verdict with `degraded=true`, no recommendation, evidence intact.
 - **Deps:** E-2.11.
+- **Done 2026-05-13:** Implemented as part of E-2.11 pipeline. `_reason_with_retry()` attempts Reasoner twice (first + corrective retry), returns `None` on double failure. `_fallback_output()` produces degraded verdict: `risk_tier="LOW"`, `recommendation="NO_RECOMMENDATION"`, `degraded=True`, evidence preserved. Tested in `TestDegradedMode` (3 tests).
 
 ---
 
