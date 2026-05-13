@@ -1,0 +1,74 @@
+{
+  "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
+  "name": "modpilotdemo",
+  "server": {
+    "dir": "dist/server",
+    "entry": "index.cjs"
+  },
+  "menu": {
+    "items": [
+      {
+        "label": "Investigate with ModPilot",
+        "description": "Force a full investigation on this comment. See docs/09-UX.md §9.1.",
+        "location": "comment",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/investigate-comment"
+      },
+      {
+        "label": "Investigate with ModPilot",
+        "description": "Force a full investigation on this post.",
+        "location": "post",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/investigate-post"
+      },
+      {
+        "label": "Summarize this thread",
+        "description": "Arc · escalation · instigator · off-topic. See docs/09-UX.md §9.2.",
+        "location": "post",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/summarize-thread"
+      },
+      {
+        "label": "Explain ModPilot's last call",
+        "description": "Re-render the most recent verdict for this target.",
+        "location": "comment",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/explain-last"
+      }
+    ]
+  },
+  "forms": {
+    "wipeMemory": "/internal/form/wipe-memory-submit"
+  },
+  "triggers": {
+    "onAppInstall": "/internal/triggers/on-app-install",
+    "onAppUpgrade": "/internal/triggers/on-app-upgrade",
+    "onCommentReport": "/internal/triggers/on-comment-report",
+    "onPostReport": "/internal/triggers/on-post-report",
+    "onModAction": "/internal/triggers/on-mod-action"
+  },
+  "scheduler": {
+    "tasks": {
+      "priorityRollup": {
+        "cron": "*/5 * * * *",
+        "endpoint": "/internal/scheduler/priority-rollup"
+      },
+      "feedbackBatch": {
+        "cron": "0 4 * * *",
+        "endpoint": "/internal/scheduler/feedback-batch"
+      }
+    }
+  },
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch"
+  },
+  "permissions": {
+    "reddit": true,
+    "redis": true,
+    "http": {
+      "enable": true,
+      "domains": []
+    }
+  }
+}

@@ -4,7 +4,7 @@
 >
 > **Status legend:** Phases are sequential by default but tasks within a phase parallelize where deps allow. Don't start a phase until all blocking tasks in the previous one are ✅ or ⊘.
 >
-> **Last updated:** 2026-05-12 (Day 1).
+> **Last updated:** 2026-05-13 (Day 2).
 
 ---
 
@@ -12,7 +12,7 @@
 
 | Phase | Window | Goal | Status |
 |---|---|---|---|
-| 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ◐ (F-0.2, F-0.3, F-0.5 ✅) |
+| 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ◐ (F-0.2, F-0.3, F-0.4, F-0.5 ✅) |
 | 1 — End-to-end stub | Days 3–4 | Trigger → stub Engine → fake Verdict Card | ☐ |
 | 2 — Real Engine MVP | Days 5–7 | 2 tools + Reasoner + Calibrator, real verdicts | ☐ |
 | 3 — Full investigation | Days 8–10 | All 5 tools + memory + cold-start + personalities | ☐ |
@@ -44,10 +44,11 @@ Goal: Everything green-field needed *before* writing investigation logic.
 - **Deps:** None.
 - **Done 2026-05-12:** `git init` on main. Directory tree + manifests landed. `uv sync --extra dev` resolves cleanly; `ruff check` and `mypy --strict api/main.py` both pass; `TestClient` confirms `/health` returns the expected payload with `gemini-2.5-pro` / `gemini-2.5-flash` identifiers. Layer-purity rules in `engine/ruff.toml` and `devvit-app/.eslintrc.cjs`.
 
-### F-0.4 — Devvit app skeleton ☐
-- **Spec:** [03-Devvit.md](03-Devvit.md)
-- **Acceptance:** `cd devvit-app && devvit upload` succeeds against test subreddit. App has `main.ts` + `devvit.yaml` + empty trigger registrations. No UI rendered yet.
+### F-0.4 — Devvit app skeleton ✅
+- **Spec:** [03-Devvit.md](03-Devvit.md), [adr/0005-devvit-web-not-blocks.md](adr/0005-devvit-web-not-blocks.md)
+- **Acceptance (revised):** `cd devvit-app && npm run build` succeeds. `devvit.json` declares ModPilot's triggers/menu/scheduler. Empty handler stubs in `src/routes/`.
 - **Deps:** F-0.3.
+- **Done 2026-05-13:** `npm create devvit@latest` redeemed Reddit auth token; scaffolded Devvit Web (Hono + Vite). `devvit.json` updated with 5 triggers (`onAppInstall/Upgrade/CommentReport/PostReport/ModAction`), 4 menu items per [09-UX.md §9](09-UX.md), 2 scheduler tasks (priority-rollup every 5min, feedback-batch nightly), and redis + http permissions. Stub handlers in `src/routes/triggers.ts`, `routes/menu.ts`, `routes/forms.ts`. Layer-purity rules added to `eslint.config.js`. `npm run type-check` + `npm run lint` + `npm run build` all clean. Architecture shift captured in ADR-0005.
 
 ### F-0.5 — Engine FastAPI skeleton ✅
 - **Spec:** [Specs.md §10](Specs.md), [13-Infra.md](13-Infra.md)

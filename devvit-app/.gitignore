@@ -1,6 +1,4 @@
-node_modules/
-dist/
-.devvit/
-.eslintcache
-*.tsbuildinfo
-coverage/
+node_modules
+.DS_Store
+dist
+.env

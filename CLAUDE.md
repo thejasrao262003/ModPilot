@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repo Reality Check
 
-Phase 0 scaffold is landing. As of 2026-05-12: `devvit-app/`, `engine/`, `eval/`, `scripts/` directory trees exist with manifests and lint configs (F-0.3 ✅); `engine/api/main.py` boots and serves `/health`. No source logic yet — placeholders only. [docs/Glossary.md](docs/Glossary.md) and [docs/adr/](docs/adr/) (0001–0004) now exist (F-0.2 ✅). Check [docs/Implementation Tracker.md](docs/Implementation%20Tracker.md) for current status before assuming any module is implemented.
+Phase 0 scaffold is landing. As of 2026-05-13: `devvit-app/`, `engine/`, `eval/`, `scripts/` directory trees exist with manifests and lint configs (F-0.3 ✅); `engine/api/main.py` boots and serves `/health` with HMAC + structured logging + error envelope (F-0.5 ✅); `devvit-app/` is the **Reddit-blessed Devvit Web** scaffold (Hono + Vite, not Blocks) with ModPilot triggers/menu wired as endpoint stubs (F-0.4 ✅, see [docs/adr/0005-devvit-web-not-blocks.md](docs/adr/0005-devvit-web-not-blocks.md)). [docs/Glossary.md](docs/Glossary.md) and [docs/adr/](docs/adr/) (0001–0005) now exist (F-0.2 ✅). **Note:** docs/03-Devvit.md, docs/Specs.md §6, and docs/09-UX.md still reference Blocks in places — sweep is pending per ADR-0005. Check [docs/Implementation Tracker.md](docs/Implementation%20Tracker.md) for current status before assuming any module is implemented.
 
 ## What ModPilot Is
 
@@ -67,11 +67,12 @@ TypeScript Devvit · Python 3.11 + FastAPI on Fly.io · Gemini 2.5 Pro (Reasoner
 ## Commands (once code lands)
 
 ```bash
-# Devvit app
+# Devvit app (Devvit Web — Hono + Vite per ADR-0005)
 cd devvit-app && npm install
-devvit upload                              # publish to test subreddit
-npx jest path/to/file.test.ts -t "name"    # single TS test
-eslint devvit-app/src && tsc --noEmit -p devvit-app
+npm run dev                                # devvit playtest (hot reload)
+npm run build                              # vite build → dist/server/index.cjs
+npm run lint && npm run type-check         # eslint + tsc --build
+npm run deploy                             # lint + type-check + test + devvit upload
 
 # Investigation Engine
 cd engine && uv sync && cp .env.example .env
