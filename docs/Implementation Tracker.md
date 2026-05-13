@@ -14,7 +14,7 @@
 |---|---|---|---|
 | 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ✅ (all 10 tasks) |
 | 1 — End-to-end stub | Days 3–4 | Trigger → stub Engine → fake Verdict Card | ◐ (S-1.1, S-1.3, S-1.4, S-1.5, S-1.6 ✅) |
-| 2 — Real Engine MVP | Days 5–7 | 2 tools + Reasoner + Calibrator, real verdicts | ◐ (E-2.1, E-2.2 ✅) |
+| 2 — Real Engine MVP | Days 5–7 | 2 tools + Reasoner + Calibrator, real verdicts | ◐ (E-2.1, E-2.2, E-2.6 ✅) |
 | 3 — Full investigation | Days 8–10 | All 5 tools + memory + cold-start + personalities | ☐ |
 | 4 — Surfaces & polish | Days 11–12 | Dashboard, wizard, menu actions, error states | ☐ |
 | 5 — Eval & demo | Days 13–14 | Eval harness wired, demo script, submission | ☐ |
@@ -184,10 +184,11 @@ Goal: Replace the stub with real investigation logic — two tools, a real Reaso
 - **Acceptance:** `engine/orchestrator/registry.py` registers tools by name. Accumulator produces stable `ev-N` IDs.
 - **Deps:** E-2.3, E-2.4.
 
-### E-2.6 — Strategy Selector ☐
+### E-2.6 — Strategy Selector ✅
 - **Spec:** [04-InvestigationEngine.md §2](04-InvestigationEngine.md), [Specs.md §7.1](Specs.md)
 - **Acceptance:** Returns `FAST | STANDARD | DEEP` with budgets from §7.1 table. Pure function; <50 ms; 100% test coverage.
 - **Deps:** None (no I/O).
+- **Done 2026-05-13:** `engine/orchestrator/strategy.py` exports `StrategyInputs` (frozen dataclass — reporter_count, velocity_zscore, user_risk_tier, rule_match_score, personality, tier_override, cold_start) and `StrategyDecision` (frozen — tier, tool_budget, time_budget_ms, cost_budget_usd, reasoner_required, rationale). Decision order: (1) moderator `tier_override` setting wins, with cold-start floor on FAST→STANDARD per Specs §12.1; (2) DEEP triggers if `reporter_count ≥ threshold`, `velocity_zscore ≥ threshold`, or `user_risk_tier == "watched"` — personality nudges shift thresholds (strict −1 / lenient +1); (3) FAST eligible only when single reporter + `velocity < 0.5` + `rule_match ≥ 0.9` + new/trusted user + not cold-start; (4) STANDARD default. Budget table pinned to Specs §7.1: FAST=2/800ms/$0.003 no-reasoner, STANDARD=4/3s/$0.012 with-reasoner, DEEP=6/6s/$0.030 with-reasoner. Import-time `assert` cross-checks that every `StrategyTier` literal has a budget entry. **100% branch coverage** (26 tests including: parametrized override surface, cold-start vetoes, every DEEP signal in isolation + combined, every FAST-blocker, personality nudges in both directions, locked budget table per tier, `<50ms × 1000 calls` perf bound, frozen-dataclass immutability, defensive override-value error path).
 
 ### E-2.7 — Orchestrator loop ☐
 - **Spec:** [04-InvestigationEngine.md §3](04-InvestigationEngine.md)
