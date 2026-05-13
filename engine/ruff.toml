@@ -38,6 +38,8 @@ ban-relative-imports = "all"
 # Tests use literal "secrets", inline imports for monkeypatched env, and assertions.
 "test_*.py" = ["S101", "S105", "S106", "PLR2004", "ASYNC", "PLC0415"]
 "__init__.py" = ["F401"]
+# Alembic auto-generated migration files: long lines + trailing whitespace are fine.
+"alembic/versions/*.py" = ["E501", "W291", "I001"]
 
 [lint.isort]
 known-first-party = ["api", "orchestrator", "tools", "llm", "memory", "store", "observability"]
