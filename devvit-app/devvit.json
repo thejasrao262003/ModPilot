@@ -43,7 +43,8 @@
     ]
   },
   "forms": {
-    "wipeMemory": "/internal/form/wipe-memory-submit"
+    "wipeMemory": "/internal/form/wipe-memory-submit",
+    "verdictView": "/internal/form/verdict-view-submit"
   },
   "triggers": {
     "onAppInstall": "/internal/triggers/on-app-install",

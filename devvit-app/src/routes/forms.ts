@@ -6,6 +6,14 @@ import type { UiResponse } from '@devvit/web/shared';
 
 export const forms = new Hono();
 
+// View-only verdict form. Submit just closes — no fields to record.
+// Action buttons live on the (eventual) custom-post UI; for now the moderator
+// uses Reddit's native mod tools and onModAction records the alignment.
+forms.post('/verdict-view-submit', async (c) => {
+  console.log('modpilot.form.verdict_view.closed');
+  return c.json({ showToast: { text: 'Closed.' } }, 200);
+});
+
 // U-4.6: "Wipe this user's memory" soft-delete confirmation.
 forms.post('/wipe-memory-submit', async (c) => {
   const values = (await c.req.json()) as { userId?: string };
