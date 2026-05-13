@@ -215,9 +215,10 @@ Goal: Replace the stub with real investigation logic — two tools, a real Reaso
 - **Acceptance:** `engine/llm/prompts/reasoner.py` exports v1.0 prompt with response schema. Inline `[ev-N]` citations required. Three sample scenarios produce valid output.
 - **Deps:** F-0.8.
 
-### E-2.9 — Citation validator ☐
+### E-2.9 — Citation validator ✅
 - **Spec:** [06-AILayer.md §3.3](06-AILayer.md), [Specs.md §8.3](Specs.md)
 - **Acceptance:** `engine/llm/validation.py` enforces every `[ev-N]` resolves to accumulator. 100% test coverage (load-bearing).
+- **Done 2026-05-13:** `engine/llm/validation.py` — pure-function `validate_citations(rationale, accumulator, cited_evidence_ids?)` enforcing ADR-0003. Five checks: empty rationale, no citations, hallucinated IDs (refs not in accumulator), cited non-success evidence (failure/timeout/skipped), uncited substantive sentences, cited_evidence_ids field mismatch. Substantive-sentence heuristic skips framing phrases, recommendation statements, and ≤5-word fragments. `ValidationResult` frozen dataclass with `.ok()` / `.failed(reason, **details)`. 47 tests — **100% statement + branch coverage**. Lint + mypy --strict clean.
 - **Deps:** E-2.5, E-2.8.
 
 ### E-2.10 — Confidence Calibrator ☐
