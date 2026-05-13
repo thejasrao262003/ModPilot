@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ModPilot — Verdict</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..700&family=Geist:wght@300..700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main id="root" class="shell" data-state="loading">
+    <!-- Masthead -->
+    <header class="masthead">
+      <div class="wordmark">ModPilot<span class="dot">.</span></div>
+      <div class="masthead-meta">
+        <div class="kicker" id="case-kicker">Case file · loading…</div>
+        <div class="subject" id="case-subject">—</div>
+      </div>
+    </header>
+
+    <!-- Loading skeleton (replaced by JS once /api/verdict/canned resolves) -->
+    <div id="loading-state" class="loading-state">
+      <div class="loading-line">ModPilot is investigating…</div>
+    </div>
+
+    <!-- Verdict Card -->
+    <section id="verdict-card" class="section" hidden>
+      <article class="verdict" data-tier="">
+        <div class="v-header">
+          <div>
+            <div class="v-target" id="v-target">—</div>
+            <h3 class="v-title" id="v-title">—</h3>
+          </div>
+          <span class="risk-pill" id="risk-pill">—</span>
+        </div>
+
+        <div class="conf-row">
+          <span class="conf-label">Confidence</span>
+          <div class="conf-spectrum"><div class="conf-fill" id="conf-fill"></div></div>
+          <div>
+            <div class="conf-value"><span id="conf-pct">—</span><span class="pct">%</span></div>
+            <div class="conf-tier" id="conf-tier">—</div>
+          </div>
+        </div>
+
+        <!-- Honest uncertainty marginalia — only visible when LOW confidence -->
+        <div class="marginalia" id="marginalia" hidden></div>
+
+        <ul class="evidence" id="evidence"></ul>
+
+        <div class="actions" id="actions"></div>
+
+        <div class="v-footer">
+          <span id="v-footer-meta">—</span>
+          <span class="expand" id="expand-toggle">View reasoning ▾</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- Investigation Timeline -->
+    <section id="timeline-section" class="section" hidden>
+      <div class="section-head">
+        <div class="section-numeral">II</div>
+        <div class="section-title">Investigation timeline <em>— how the verdict was reached</em></div>
+        <div class="section-aside" id="timeline-aside">—</div>
+      </div>
+
+      <div class="timeline-wrap">
+        <div>
+          <div class="timeline-head">
+            <div class="label" id="timeline-label">—</div>
+            <div class="stats" id="timeline-stats">—</div>
+          </div>
+          <ol class="tl-list" id="tl-list"></ol>
+        </div>
+
+        <aside class="verdict-block">
+          <div class="vb-kicker">Reasoner verdict</div>
+          <p class="vb-rationale" id="vb-rationale">—</p>
+          <div class="vb-model" id="vb-model">—</div>
+
+          <div class="vb-conf-head"><strong id="vb-conf-pct">—%</strong> calibrated</div>
+          <ul class="vb-conf-list" id="vb-conf-list"></ul>
+        </aside>
+      </div>
+    </section>
+
+    <!-- Error state -->
+    <section id="error-state" class="error-state" hidden>
+      <p>ModPilot couldn't load this verdict. <button id="retry-btn">Try again</button></p>
+    </section>
+
+    <!-- Colophon -->
+    <footer class="colophon">
+      <div>ModPilot · case-file edition · <strong>S-1.4 + S-1.5</strong></div>
+      <div>Human-in-the-loop · evidence-first · every claim cites</div>
+    </footer>
+  </main>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

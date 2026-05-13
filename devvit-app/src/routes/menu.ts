@@ -4,8 +4,10 @@
 // we can shape the Engine's request from real data before S-1.2 lands.
 
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { MenuItemRequest, UiResponse } from '@devvit/web/shared';
 import { reddit } from '@devvit/web/server';
+import type { JsonObject } from '@devvit/shared-types/json.js';
 
 export const menu = new Hono();
 
@@ -50,80 +52,105 @@ async function fetchAuthorHistory(authorId: string): Promise<HistorySnapshot | {
   };
 }
 
-// U-4.4 (partial): "Investigate with ModPilot" — fetch real user history
-// for the target's author so we can validate the user_history tool shape.
+// U-4.4: "Investigate with ModPilot" — creates a Verdict Card custom post
+// rendered from public/index.html, then navigates the mod to it.
+// During S-1.4 the post fetches `/api/verdict/canned` (mirrors engine canned
+// verdict per Specs §10.2). S-1.2 will swap that for a real Engine call.
 menu.post('/investigate-post', async (c) => {
   const request = await c.req.json<MenuItemRequest>();
   const targetId = request.targetId as `t3_${string}`;
-  console.log('modpilot.menu.investigate_post', { target: targetId });
-
-  try {
+  return investigateAndOpenVerdict(c, async () => {
     const post = await reddit.getPostById(targetId);
-    // NOTE: `post.numberOfReports` is -1 here even when the post is reported,
-    // because the menu-action API call runs without elevated mod context. The
-    // authoritative report count comes from the onPostReport trigger payload
-    // (`post.numReports`), which we'll cache in Redis keyed by post id under
-    // S-1.1 so the investigation can read it without an API roundtrip.
     const history = await fetchAuthorHistory(post.authorId ?? '');
-    console.log(
-      'modpilot.user_history',
-      JSON.stringify(
-        {
-          target: { id: post.id, title: post.title, authorId: post.authorId, numReports: post.numberOfReports },
-          history,
-        },
-        null,
-        2,
-      ),
-    );
     const authorName = 'authorName' in history ? history.authorName : 'unknown';
-    return c.json<UiResponse>(
-      {
-        showToast: {
-          text: `Investigation queued — pulled history for u/${authorName} (see playtest logs)`,
-        },
-      },
-      200,
-    );
-  } catch (err) {
-    console.error('modpilot.menu.investigate_post.error', err);
-    return c.json<UiResponse>({ showToast: { text: `Investigation failed: ${String(err)}` } }, 200);
-  }
+    const correlationId = `inv-${Date.now()}-${targetId.slice(3, 10)}`;
+    const subreddit = await reddit.getSubredditById(post.subredditId);
+    console.log('modpilot.menu.investigate_post', { target: targetId, correlation_id: correlationId });
+    return {
+      correlationId,
+      title: `ModPilot · investigating ${truncate(post.title, 48)}`,
+      subredditName: subreddit?.name ?? 'modpilotdemo',
+      target: {
+        kind: 'post',
+        id: post.id,
+        title: post.title,
+        author: authorName ?? '',
+        authorId: post.authorId ?? '',
+        subreddit: subreddit?.name ?? 'modpilotdemo',
+        report_count: post.numberOfReports >= 0 ? post.numberOfReports : 0,
+      } satisfies JsonObject,
+    };
+  });
 });
 
 menu.post('/investigate-comment', async (c) => {
   const request = await c.req.json<MenuItemRequest>();
   const targetId = request.targetId as `t1_${string}`;
-  console.log('modpilot.menu.investigate_comment', { target: targetId });
-
-  try {
+  return investigateAndOpenVerdict(c, async () => {
     const comment = await reddit.getCommentById(targetId);
     const history = await fetchAuthorHistory(comment.authorId ?? '');
-    console.log(
-      'modpilot.user_history',
-      JSON.stringify(
-        {
-          target: { id: comment.id, body: comment.body, authorId: comment.authorId },
-          history,
-        },
-        null,
-        2,
-      ),
-    );
     const authorName = 'authorName' in history ? history.authorName : 'unknown';
+    const correlationId = `inv-${Date.now()}-${targetId.slice(3, 10)}`;
+    const subreddit = await reddit.getSubredditById(comment.subredditId);
+    console.log('modpilot.menu.investigate_comment', { target: targetId, correlation_id: correlationId });
+    return {
+      correlationId,
+      title: `ModPilot · investigating comment by u/${authorName}`,
+      subredditName: subreddit?.name ?? 'modpilotdemo',
+      target: {
+        kind: 'comment',
+        id: comment.id,
+        body: truncate(comment.body ?? '', 200),
+        author: authorName ?? '',
+        authorId: comment.authorId ?? '',
+        subreddit: subreddit?.name ?? 'modpilotdemo',
+      } satisfies JsonObject,
+    };
+  });
+});
+
+type InvestigationInputs = {
+  correlationId: string;
+  title: string;
+  subredditName: string;
+  target: JsonObject;
+};
+
+async function investigateAndOpenVerdict(
+  c: Context,
+  buildInputs: () => Promise<InvestigationInputs>,
+) {
+  try {
+    const inputs = await buildInputs();
+    const postData: JsonObject = {
+      target: inputs.target,
+      correlationId: inputs.correlationId,
+    };
+    const post = await reddit.submitCustomPost({
+      subredditName: inputs.subredditName,
+      title: inputs.title,
+      splash: { appDisplayName: 'ModPilot' },
+      postData,
+    });
     return c.json<UiResponse>(
       {
-        showToast: {
-          text: `Investigation queued — pulled history for u/${authorName} (see playtest logs)`,
-        },
+        navigateTo: post.permalink,
+        showToast: { text: 'Verdict ready — opening the case file…', appearance: 'success' },
       },
       200,
     );
   } catch (err) {
-    console.error('modpilot.menu.investigate_comment.error', err);
-    return c.json<UiResponse>({ showToast: { text: `Investigation failed: ${String(err)}` } }, 200);
+    console.error('modpilot.menu.investigate.error', err);
+    return c.json<UiResponse>(
+      { showToast: { text: `Investigation failed: ${String(err)}` } },
+      200,
+    );
   }
-});
+}
+
+function truncate(s: string, n: number): string {
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
 
 // U-4.5: "Summarize this thread" — modal with arc/escalation/instigator/off-topic.
 menu.post('/summarize-thread', async (c) => {

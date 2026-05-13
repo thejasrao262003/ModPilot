@@ -5,6 +5,11 @@
     "dir": "dist/server",
     "entry": "index.cjs"
   },
+  "post": {
+    "entrypoints": {
+      "default": { "entry": "index.html" }
+    }
+  },
   "menu": {
     "items": [
       {

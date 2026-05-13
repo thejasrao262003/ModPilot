@@ -47,7 +47,10 @@ for path in "${PATHS[@]}"; do
     if printf '%s' "$line" | grep -qE "(docs/Glossary\.md|see Glossary)"; then continue; fi
     echo "✗ Banned term: $line"
     hits=$((hits + 1))
-  done < <(grep -rIniE --include='*.ts' --include='*.tsx' --include='*.py' "$BANNED" "$path" || true)
+  done < <(grep -rIniE \
+              --include='*.ts' --include='*.tsx' --include='*.py' \
+              --include='*.js' --include='*.html' --include='*.css' \
+              "$BANNED" "$path" || true)
 done
 
 if [ "$hits" -gt 0 ]; then

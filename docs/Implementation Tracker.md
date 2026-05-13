@@ -13,13 +13,13 @@
 | Phase | Window | Goal | Status |
 |---|---|---|---|
 | 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ✅ (all 10 tasks) |
-| 1 — End-to-end stub | Days 3–4 | Trigger → stub Engine → fake Verdict Card | ☐ |
+| 1 — End-to-end stub | Days 3–4 | Trigger → stub Engine → fake Verdict Card | ◐ (S-1.3, S-1.4, S-1.5 ✅) |
 | 2 — Real Engine MVP | Days 5–7 | 2 tools + Reasoner + Calibrator, real verdicts | ☐ |
 | 3 — Full investigation | Days 8–10 | All 5 tools + memory + cold-start + personalities | ☐ |
 | 4 — Surfaces & polish | Days 11–12 | Dashboard, wizard, menu actions, error states | ☐ |
 | 5 — Eval & demo | Days 13–14 | Eval harness wired, demo script, submission | ☐ |
 
-**Current focus:** 🎉 **Phase 0 complete (Day 2 of 14).** Next: Phase 1 — End-to-end stub. S-1.1 (CommentReport trigger) and S-1.2 (Devvit → Engine client) are the unblocked entry points.
+**Current focus:** Phase 1 in flight. S-1.3 + S-1.4 + S-1.5 ✅ — Verdict Card + Timeline live on r/ModPilotDev playtest v0.0.1.26. Next: S-1.1 (CommentReport real handler) + S-1.2 (Devvit → Engine HTTP client; needs a tunnel for local engine access) + S-1.6 (ModAction → feedback).
 
 ---
 
@@ -116,15 +116,17 @@ Goal: A `CommentReport` produces a (fake) Verdict Card visible to the mod. No re
 - **Deps:** F-0.5.
 - **Done 2026-05-13:** `engine/api/schemas.py` defines the full Pydantic v2 contract for `/investigate`: `InvestigateRequest` (correlation_id, subreddit_id with `^t5_` regex, target {kind: comment|post, id, body, author}, report {reasons, reporter_count, first_at, last_at}, context), `Verdict` (tier, risk_tier, recommendation, calibrated_confidence, rationale with `[ev-N]` citations, top_evidence ≤3, timeline, confidence_breakdown, model + cost + flags), `InvestigateResponse` envelope. `engine/api/canned.py` returns a HIGH-conf REMOVE verdict mirroring the mockup data — so S-1.4 (Verdict Card) and S-1.5 (Timeline) render the same data the UI was designed against. 8 new tests in `api/test_investigate.py` cover: schema validation (malformed subreddit_id → BAD_REQUEST envelope, missing correlation_id, negative reporter_count), happy-path canned verdict shape (3 evidence rows, 4 timeline steps, confidence breakdown in [0,1], every cited `[ev-N]` resolves to top_evidence), and both target kinds (comment + post). ruff + mypy --strict + 17 tests all green.
 
-### S-1.4 — VerdictCard MVP component ☐
+### S-1.4 — VerdictCard MVP component ✅
 - **Spec:** [09-UX.md §4](09-UX.md), [mockup](../mockups/moderator-ui.html)
 - **Acceptance:** Renders header row + 3 evidence rows + 4 action buttons + expansion handle. HIGH-confidence variant filled, MEDIUM outline. Matches mockup visually within Devvit Blocks constraints.
 - **Deps:** F-0.10, S-1.3.
+- **Done 2026-05-13:** Built as Devvit Web custom post (per ADR-0005, no Blocks constraints — full HTML/CSS fidelity matches the mockup). Files in `devvit-app/src/client/`: `index.html` (semantic structure + Google Fonts), `style.css` (forensic-dossier palette, paper-grain SVG overlay, animated confidence spectrum, dashed top-edge for LOW-conf cards), `main.js` (vanilla ES module fetches `/api/verdict/canned`, renders card + timeline, binds hover-link between matching `[ev-N]` chips). Primary-action styling gated by HIGH conf AND not-cold-start AND matching recommendation per invariant I-3. LOW-conf path swaps recommendation chip for `🌱 unsure — your call` + marginalia, removes primary styling. Wired via `reddit.submitCustomPost` from the "Investigate with ModPilot" menu action, which returns `navigateTo: post.permalink` so the moderator lands directly on the verdict.
 
-### S-1.5 — InvestigationTimeline MVP component ☐
+### S-1.5 — InvestigationTimeline MVP component ✅
 - **Spec:** [09-UX.md §5](09-UX.md), [mockup](../mockups/moderator-ui.html)
 - **Acceptance:** Renders tool rows with verb (from copy.ts map), latency, evidence chips. Verdict block with rationale + model + cost + confidence breakdown.
 - **Deps:** F-0.10, S-1.3.
+- **Done 2026-05-13:** Bundled with S-1.4 in `src/client/`. Timeline renders one row per tool with status glyph (`✓`/`✗`/`⊘`/`⏱`), past-tense verb from the payload, tabular-num latency, and clickable `ev·N` chips. Sticky Verdict Block on the right shows Reasoner rationale with inline citation chips (regex-replaced from `[ev-N]` in the rationale text), model + tokens + cost line, calibrated confidence %, and the four-bullet confidence breakdown as horizontal bar charts. Expand/collapse via the card's "View reasoning ▾" toggle.
 
 ### S-1.6 — `ModAction` trigger → feedback record ☐
 - **Spec:** [03-Devvit.md](03-Devvit.md), [Specs.md §9.1](Specs.md)
