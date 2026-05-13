@@ -222,10 +222,11 @@ Goal: Replace the stub with real investigation logic — two tools, a real Reaso
 - **Done 2026-05-13:** `engine/llm/validation.py` — pure-function `validate_citations(rationale, accumulator, cited_evidence_ids?)` enforcing ADR-0003. Five checks: empty rationale, no citations, hallucinated IDs (refs not in accumulator), cited non-success evidence (failure/timeout/skipped), uncited substantive sentences, cited_evidence_ids field mismatch. Substantive-sentence heuristic skips framing phrases, recommendation statements, and ≤5-word fragments. `ValidationResult` frozen dataclass with `.ok()` / `.failed(reason, **details)`. 47 tests — **100% statement + branch coverage**. Lint + mypy --strict clean.
 - **Deps:** E-2.5, E-2.8.
 
-### E-2.10 — Confidence Calibrator ☐
+### E-2.10 — Confidence Calibrator ✅
 - **Spec:** [04-InvestigationEngine.md §7](04-InvestigationEngine.md), [Specs.md §7.6](Specs.md)
 - **Acceptance:** Weighted blend of 4 inputs → calibrated confidence. Tier assigned. Surfaces breakdown for UI. 100% test coverage.
 - **Deps:** E-2.7.
+- **Done 2026-05-13:** `engine/orchestrator/calibrator.py` — pure-function `calibrate(CalibrationInputs) -> CalibrationResult`. 4 weighted signals (llm 0.25, evidence 0.30, accuracy 0.20, rule_match 0.25) with LLM overconfidence discount (compresses toward 0.5 by factor 0.4). 3 conditional demotions: validation_failed (×0.6), partial (×0.8), cold_start (×0.85) — stackable. Tier: HIGH≥0.85, MEDIUM≥0.60, LOW<0.60. `compute_evidence_convergence()` helper. `CalibrationResult` frozen, carries breakdown for UI audit. 25 tests — **100% statement + branch coverage**. Lint + mypy --strict clean.
 
 ### E-2.11 — Wire real `/investigate` ☐
 - **Spec:** [Specs.md §10.2](Specs.md)
