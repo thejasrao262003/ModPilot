@@ -174,10 +174,11 @@ Goal: Replace the stub with real investigation logic — two tools, a real Reaso
 - **Acceptance:** Returns `ToolResult` with rule similarity match. Unit tests (pure function) + integration test against seeded rules.
 - **Deps:** E-2.2.
 
-### E-2.4 — Tool: `report_velocity` ☐
+### E-2.4 — Tool: `report_velocity` ✅
 - **Spec:** [04-InvestigationEngine.md §5.3.2](04-InvestigationEngine.md)
 - **Acceptance:** Redis sliding-window count → z-score. <30 ms p95.
 - **Deps:** E-2.2.
+- **Done 2026-05-13:** `engine/orchestrator/report_velocity.py` — `ReportVelocityTool` satisfies `Tool` Protocol, DI'd with Redis client. Reads 1 min / 5 min / 15 min sliding-window counts via `store.redis.velocity_count`, computes z-score via `velocity_zscore` against default baseline (post-MVP: per-subreddit). Returns `ToolResult` with `detail={reports_1m, reports_5m, reports_15m, baseline_mean, baseline_stddev, z_score}`. Errors caught and returned as `status=failure`. 8 unit tests (mocked Redis), all pass. Lint + mypy --strict clean.
 
 ### E-2.5 — Tool Registry & Evidence Accumulator ✅
 - **Spec:** [04-InvestigationEngine.md §4](04-InvestigationEngine.md), [Specs.md §7.3–7.4](Specs.md)
