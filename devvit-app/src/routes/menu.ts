@@ -44,12 +44,21 @@ menu.post('/investigate-post', async (c) => {
     const request = await c.req.json<MenuItemRequest>();
     const targetId = request.targetId as `t3_${string}`;
     const post = await reddit.getPostById(targetId);
+    // Prefer the trigger-cached report count (authoritative) over the API one
+    // (returns -1 from menu-action context).
+    const cached = await readTriggerContext(targetId);
+    const reportCount =
+      cached?.num_reports != null
+        ? Number(cached.num_reports)
+        : post.numberOfReports >= 0
+        ? post.numberOfReports
+        : 0;
     return await showVerdictForm(c, {
       kind: 'post',
       targetId,
       title: post.title ?? '',
       author: post.authorName ?? '',
-      reportCount: post.numberOfReports >= 0 ? post.numberOfReports : 0,
+      reportCount,
     });
   } catch (err) {
     console.error('modpilot.menu.investigate_post.error', err instanceof Error ? err.stack : err);
@@ -66,12 +75,14 @@ menu.post('/investigate-comment', async (c) => {
     const request = await c.req.json<MenuItemRequest>();
     const targetId = request.targetId as `t1_${string}`;
     const comment = await reddit.getCommentById(targetId);
+    const cached = await readTriggerContext(targetId);
+    const reportCount = cached?.num_reports != null ? Number(cached.num_reports) : 0;
     return await showVerdictForm(c, {
       kind: 'comment',
       targetId,
       title: truncate(comment.body ?? '', 80),
       author: comment.authorName ?? '',
-      reportCount: 0,
+      reportCount,
     });
   } catch (err) {
     console.error('modpilot.menu.investigate_comment.error', err instanceof Error ? err.stack : err);
@@ -82,6 +93,15 @@ menu.post('/investigate-comment', async (c) => {
   }
 });
 
+async function readTriggerContext(targetId: string): Promise<Record<string, string> | null> {
+  try {
+    const row = await redis.hGetAll(`trigger_ctx:${targetId}`);
+    return row && Object.keys(row).length > 0 ? row : null;
+  } catch {
+    return null;
+  }
+}
+
 type VerdictFormInputs = {
   kind: 'post' | 'comment';
   targetId: string;
@@ -91,7 +111,12 @@ type VerdictFormInputs = {
 };
 
 async function showVerdictForm(c: Context, inputs: VerdictFormInputs): Promise<Response> {
-  const correlationId = `inv-${Date.now()}-${inputs.targetId.slice(3, 10)}`;
+  // Reuse the dedupe correlation_id if the target was triggered into the
+  // pipeline by a report; otherwise mint a one-off for menu-initiated
+  // investigations. Keeps engine-side joins clean across both flows.
+  const cached = await readTriggerContext(inputs.targetId);
+  const correlationId =
+    cached?.correlation_id ?? `inv-${Date.now()}-${inputs.targetId.slice(3, 10)}`;
   const pct = Math.round(CANNED.calibrated_confidence * 100);
 
   // Persist the canned verdict so S-1.6 feedback can join on correlation_id,

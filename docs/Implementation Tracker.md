@@ -13,13 +13,13 @@
 | Phase | Window | Goal | Status |
 |---|---|---|---|
 | 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ✅ (all 10 tasks) |
-| 1 — End-to-end stub | Days 3–4 | Trigger → stub Engine → fake Verdict Card | ◐ (S-1.3, S-1.4, S-1.5, S-1.6 ✅) |
+| 1 — End-to-end stub | Days 3–4 | Trigger → stub Engine → fake Verdict Card | ◐ (S-1.1, S-1.3, S-1.4, S-1.5, S-1.6 ✅) |
 | 2 — Real Engine MVP | Days 5–7 | 2 tools + Reasoner + Calibrator, real verdicts | ☐ |
 | 3 — Full investigation | Days 8–10 | All 5 tools + memory + cold-start + personalities | ☐ |
 | 4 — Surfaces & polish | Days 11–12 | Dashboard, wizard, menu actions, error states | ☐ |
 | 5 — Eval & demo | Days 13–14 | Eval harness wired, demo script, submission | ☐ |
 
-**Current focus:** Phase 1 in flight. S-1.3 + S-1.4 + S-1.5 + S-1.6 ✅ — Verdict Card + Timeline + feedback recording live on r/ModPilotDev playtest v0.0.1.36. Next: S-1.1 (CommentReport real handler with KV dedup, no tunnel needed) and S-1.2 (Devvit → Engine HTTP client; needs a tunnel for local engine access) → S-1.7 demo.
+**Current focus:** Phase 1 nearly closed. S-1.1, S-1.3, S-1.4, S-1.5, S-1.6 ✅ — full Devvit-side loop works: report fires → dedup → correlation_id minted → trigger context cached → menu modal renders verdict with the same correlation_id → button click records feedback. Remaining: S-1.2 (Devvit → Engine HTTP — needs tunnel) and S-1.7 (demo script).
 
 ---
 
@@ -100,10 +100,11 @@ Goal: Everything green-field needed *before* writing investigation logic.
 
 Goal: A `CommentReport` produces a (fake) Verdict Card visible to the mod. No real intelligence yet — just the full wire.
 
-### S-1.1 — `CommentReport` trigger wired ☐
+### S-1.1 — `CommentReport` trigger wired ✅
 - **Spec:** [03-Devvit.md](03-Devvit.md), [Specs.md §6.1](Specs.md)
 - **Acceptance:** Trigger fires in test subreddit; logs `correlation_id`; dedupes within 10 min via `pending_investigation:{comment_id}` key in Devvit KV.
 - **Deps:** F-0.4.
+- **Done 2026-05-13:** New `src/services/dedup.ts` exposes `dedupForTarget(targetId)` — atomic SET-with-NX on `pending_investigation:{target_id}` (10-min TTL); duplicates within the window return the existing `correlation_id` so the engine call stays idempotent. Also exposes `cacheTriggerContext()` which hSets `trigger_ctx:{target_id}` with `correlation_id`, `subreddit_id`, `subreddit_name`, `author_id`, **`num_reports`** (authoritative from the trigger payload, fixes the menu-action `numberOfReports === -1` gotcha), `reason`, `received_at` (24h TTL). Both `on-comment-report` and `on-post-report` now: pull the target id → dedup → cache context → log `accepted` with correlation_id (or `deduped` if within window) → TODO(S-1.2) for the engine call. Menu actions `investigate-{post,comment}` read from the cached context first, so a moderator who opens "Investigate" on a target that was just reported gets the *same* correlation_id and authoritative report count as the report-triggered investigation. Verified via type-check + lint + build clean.
 
 ### S-1.2 — Devvit → Engine client ☐
 - **Spec:** [Specs.md §10](Specs.md), [03-Devvit.md](03-Devvit.md)
