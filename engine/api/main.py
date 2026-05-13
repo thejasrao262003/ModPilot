@@ -17,6 +17,7 @@ from api.middleware import CorrelationIdMiddleware, HmacMiddleware
 from api.schemas import InvestigateRequest, InvestigateResponse
 from observability.logging import configure_logging, get_logger
 from store.connections import close_postgres, close_redis, open_postgres, open_redis
+from store.postgres import make_sessionmaker
 
 
 @asynccontextmanager
@@ -39,6 +40,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # /investigate calls against unreachable stores.
     app.state.pg = await open_postgres(settings)
     app.state.redis = await open_redis(settings)
+    # E-2.2: session factory for repository helpers. Handlers open sessions
+    # via `async with with_session(request.app.state.pg_sessions) as s:`.
+    app.state.pg_sessions = make_sessionmaker(app.state.pg)
     try:
         yield
     finally:
