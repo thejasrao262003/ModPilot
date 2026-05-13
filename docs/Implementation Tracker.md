@@ -210,10 +210,11 @@ Goal: Replace the stub with real investigation logic — two tools, a real Reaso
   - **Structured logging** at start, per-tool, on stop, on completion — every line carries correlation_id + subreddit_id + tier.
   - 14 tests cover: happy path (full 4-tool plan completes), timestamps recorded, STANDARD converges after 2 strong signals (skips remaining tools), FAST converges after 1, no convergence when no signal set, tool_budget exit, time_budget exit (via FakeClock), single-tool exception doesn't abort (subsequent tools still run, failure carries `RuntimeError` + msg), failures excluded from `successful_entries()` (ADR-0003), unregistered tool → skipped not crash, custom plan overrides tier default, `default_plan()` per tier + unknown-tier raises, **orchestrator is reusable** across investigations (fresh accumulator per `run()`, ev-1 resets). **100% statement + branch coverage on `loop.py`**. ruff + mypy --strict + 96 tests all green.
 
-### E-2.8 — Reasoner prompt v1.0 ☐
+### E-2.8 — Reasoner prompt v1.0 ✅
 - **Spec:** [06-AILayer.md §4.2](06-AILayer.md), [Specs.md §7.5 + §8.3](Specs.md)
 - **Acceptance:** `engine/llm/prompts/reasoner.py` exports v1.0 prompt with response schema. Inline `[ev-N]` citations required. Three sample scenarios produce valid output.
 - **Deps:** F-0.8.
+- **Done 2026-05-13:** `engine/llm/prompts/reasoner.py` — exports `ReasonerOutput` (Pydantic: risk_tier, recommendation, rationale, top_evidence_ids≤3, raw_confidence, cited_evidence_ids, flags), `Reasoner` class (DI'd with LLMClient, calls gemini-2.5-pro at temp=0 with 512 thinking budget, parses structured response or falls back to raw_text JSON), `build_messages()` (system+user single-turn), `build_corrective_messages()` (appends prior response + validation error for retry), `serialize_evidence()` (renders successful entries as `[ev-N] tool: summary (detail)` block). System prompt enforces 6 constraints: citation contract, no invented facts, no identities, personality-aware, calibrated confidence, risk tier. 29 tests (9 schema, 5 serialization, 4 message build, 2 corrective, 6 Reasoner caller, 3 scenario integration). Lint + mypy --strict clean.
 
 ### E-2.9 — Citation validator ✅
 - **Spec:** [06-AILayer.md §3.3](06-AILayer.md), [Specs.md §8.3](Specs.md)
