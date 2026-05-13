@@ -110,10 +110,11 @@ Goal: A `CommentReport` produces a (fake) Verdict Card visible to the mod. No re
 - **Acceptance:** `services/engineClient.ts` signs requests with HMAC, posts to `/investigate`, parses response. Handles 5xx with one retry + graceful degradation.
 - **Deps:** F-0.5, S-1.1.
 
-### S-1.3 — Stub `/investigate` returns canned verdict ☐
+### S-1.3 — Stub `/investigate` returns canned verdict ✅
 - **Spec:** [Specs.md §10.2](Specs.md)
 - **Acceptance:** Endpoint returns a HIGH-conf REMOVE verdict matching the response schema, with 4 timeline rows + 3 top evidence + confidence breakdown. Validates against Pydantic.
 - **Deps:** F-0.5.
+- **Done 2026-05-13:** `engine/api/schemas.py` defines the full Pydantic v2 contract for `/investigate`: `InvestigateRequest` (correlation_id, subreddit_id with `^t5_` regex, target {kind: comment|post, id, body, author}, report {reasons, reporter_count, first_at, last_at}, context), `Verdict` (tier, risk_tier, recommendation, calibrated_confidence, rationale with `[ev-N]` citations, top_evidence ≤3, timeline, confidence_breakdown, model + cost + flags), `InvestigateResponse` envelope. `engine/api/canned.py` returns a HIGH-conf REMOVE verdict mirroring the mockup data — so S-1.4 (Verdict Card) and S-1.5 (Timeline) render the same data the UI was designed against. 8 new tests in `api/test_investigate.py` cover: schema validation (malformed subreddit_id → BAD_REQUEST envelope, missing correlation_id, negative reporter_count), happy-path canned verdict shape (3 evidence rows, 4 timeline steps, confidence breakdown in [0,1], every cited `[ev-N]` resolves to top_evidence), and both target kinds (comment + post). ruff + mypy --strict + 17 tests all green.
 
 ### S-1.4 — VerdictCard MVP component ☐
 - **Spec:** [09-UX.md §4](09-UX.md), [mockup](../mockups/moderator-ui.html)

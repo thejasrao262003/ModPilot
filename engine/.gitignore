@@ -10,4 +10,4 @@ dist/
 build/
 *.egg-info/
 .env
-uv.lock
+# uv.lock is checked in — application project, reproducible installs in CI

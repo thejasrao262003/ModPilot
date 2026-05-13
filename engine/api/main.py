@@ -10,9 +10,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from api.canned import canned_verdict
 from api.config import get_settings
 from api.errors import register_error_handlers
 from api.middleware import CorrelationIdMiddleware, HmacMiddleware
+from api.schemas import InvestigateRequest, InvestigateResponse
 from observability.logging import configure_logging, get_logger
 from store.connections import close_postgres, close_redis, open_postgres, open_redis
 
@@ -77,7 +79,26 @@ async def health() -> dict[str, object]:
     }
 
 
-# TODO(E-2.11): POST /investigate
+@app.post("/investigate", response_model=InvestigateResponse)
+async def investigate(req: InvestigateRequest) -> InvestigateResponse:
+    """Stub endpoint — returns a canned HIGH-conf REMOVE verdict (S-1.3).
+
+    Real pipeline (Strategy → Orchestrator → Reasoner → Validator → Calibrator)
+    lands in E-2.11. Until then this returns the same shape so Devvit + UI work
+    can proceed in parallel.
+    """
+    logger = get_logger(__name__).bind(correlation_id=req.correlation_id)
+    logger.info(
+        "investigation.stub.requested",
+        subreddit_id=req.subreddit_id,
+        target_kind=req.target.kind,
+        target_id=req.target.id,
+        reporter_count=req.report.reporter_count,
+    )
+    return InvestigateResponse(data=canned_verdict(req))
+
+
+# TODO(E-2.11): replace canned verdict with full Strategy → Orchestrator → Reasoner pipeline
 # TODO(S-1.6): POST /feedback
 # TODO(U-4.7): POST /explain
 # TODO(F-0.7): GET /config/{sub_id}
