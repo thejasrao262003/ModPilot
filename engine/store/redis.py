@@ -57,6 +57,11 @@ def k_embedding(rule_id: str) -> str:
     return f"embedding:{rule_id}"
 
 
+def k_rules_embed(subreddit_id: str) -> str:
+    """All rule embeddings for a subreddit, stored as a single JSON blob."""
+    return f"rules_embed:{subreddit_id}"
+
+
 def k_budget(subreddit_id: str, day: str) -> str:
     """day is ISO YYYY-MM-DD (UTC)."""
     return f"budget:{subreddit_id}:{day}"
@@ -96,6 +101,36 @@ async def set_thread_summary(
     client: Redis[str], *, thread_id: str, summary: dict[str, object]
 ) -> None:
     await client.set(k_summary(thread_id), json.dumps(summary), ex=_TTL_SUMMARY)
+
+
+# === Rule embeddings (policy_match) ====================================
+
+# One blob per subreddit: list of {id, text, embedding}. Invalidated when
+# settings change (post-MVP: settings handler calls invalidate_rule_embeddings).
+
+
+async def get_rule_embeddings(
+    client: Redis[str], *, subreddit_id: str
+) -> list[dict[str, object]] | None:
+    """Return cached rule embeddings or None if cold."""
+    raw = await client.get(k_rules_embed(subreddit_id))
+    return json.loads(raw) if raw else None
+
+
+async def set_rule_embeddings(
+    client: Redis[str],
+    *,
+    subreddit_id: str,
+    rules: list[dict[str, object]],
+) -> None:
+    await client.set(k_rules_embed(subreddit_id), json.dumps(rules), ex=_TTL_EMBEDDING)
+
+
+async def invalidate_rule_embeddings(
+    client: Redis[str], *, subreddit_id: str
+) -> None:
+    """Called when subreddit settings change."""
+    await client.delete(k_rules_embed(subreddit_id))
 
 
 # === Report velocity (sliding window) ==================================

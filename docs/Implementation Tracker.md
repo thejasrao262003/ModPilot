@@ -169,10 +169,11 @@ Goal: Replace the stub with real investigation logic — two tools, a real Reaso
   - **Tests (E-2.2):** `store/test_postgres.py` (7 tests, exercises real pg via docker-compose: idempotent `ensure_subreddit_profile`, `upsert_user_memory` counters, full investigation lifecycle start → evidence → finalize → reload-with-eager-evidence, scope-mismatch raises on `finalize` and `append_evidence`, feedback+audit roundtrip, miss-returns-None). `store/test_redis.py` (8 tests: profile/summary/verdict cache roundtrips, sliding-window velocity with old-event eviction, pure `velocity_zscore` cap, daily budget atomic increment, `cents()` ceil semantics). Both auto-skip when `SKIP_DB_TESTS=true` so CI without docker passes.
 - Ruff + mypy --strict + 37 tests all green.
 
-### E-2.3 — Tool: `policy_match` ☐
+### E-2.3 — Tool: `policy_match` ✅
 - **Spec:** [04-InvestigationEngine.md §5.3.1](04-InvestigationEngine.md)
 - **Acceptance:** Returns `ToolResult` with rule similarity match. Unit tests (pure function) + integration test against seeded rules.
 - **Deps:** E-2.2.
+- **Done 2026-05-13:** `engine/orchestrator/policy_match.py` — `PolicyMatchTool` satisfies `Tool` Protocol, DI'd with Redis + `EmbedFn` + `RulesTextFn`. Splits rules via numbered/paragraph heuristic, caches rule embeddings in Redis (`rules_embed:{subreddit_id}`, 30d TTL), computes cosine similarity (pure function), filters ≥0.65 threshold, returns top 5 matches. Lazy embedding on cache miss. Added `get_rule_embeddings`/`set_rule_embeddings`/`invalidate_rule_embeddings` to `store/redis.py`. 25 tests (7 split_rules, 6 cosine_similarity, 12 tool run). Lint + mypy --strict clean.
 
 ### E-2.4 — Tool: `report_velocity` ✅
 - **Spec:** [04-InvestigationEngine.md §5.3.2](04-InvestigationEngine.md)
