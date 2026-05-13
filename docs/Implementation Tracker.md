@@ -12,7 +12,7 @@
 
 | Phase | Window | Goal | Status |
 |---|---|---|---|
-| 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ◐ (F-0.2, F-0.3 ✅) |
+| 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ◐ (F-0.2, F-0.3, F-0.5 ✅) |
 | 1 — End-to-end stub | Days 3–4 | Trigger → stub Engine → fake Verdict Card | ☐ |
 | 2 — Real Engine MVP | Days 5–7 | 2 tools + Reasoner + Calibrator, real verdicts | ☐ |
 | 3 — Full investigation | Days 8–10 | All 5 tools + memory + cold-start + personalities | ☐ |
@@ -49,10 +49,11 @@ Goal: Everything green-field needed *before* writing investigation logic.
 - **Acceptance:** `cd devvit-app && devvit upload` succeeds against test subreddit. App has `main.ts` + `devvit.yaml` + empty trigger registrations. No UI rendered yet.
 - **Deps:** F-0.3.
 
-### F-0.5 — Engine FastAPI skeleton ☐
+### F-0.5 — Engine FastAPI skeleton ✅
 - **Spec:** [Specs.md §10](Specs.md), [13-Infra.md](13-Infra.md)
 - **Acceptance:** `uv run uvicorn api.main:app --reload` returns 200 on `/health` with `{"ok": true, "data": {"engine": "0.0.1", ...}}`. HMAC middleware in place but permissive in dev.
 - **Deps:** F-0.3.
+- **Done 2026-05-13:** `api/config.py` (pydantic-settings), `api/errors.py` (envelope + 7 error codes per Specs §10.3), `api/middleware.py` (CorrelationId + HMAC-SHA256 with 5-minute skew window, permissive in dev), `observability/logging.py` (structlog, JSON in prod, console in dev). 9 tests cover health, correlation-id roundtrip, HMAC permissive/strict/skew, error envelope. `ruff check` clean, `mypy --strict` clean.
 
 ### F-0.6 — Local services via docker-compose ☐
 - **Spec:** [13-Infra.md](13-Infra.md)
