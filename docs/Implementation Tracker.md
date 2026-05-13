@@ -14,7 +14,7 @@
 |---|---|---|---|
 | 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ✅ (all 10 tasks) |
 | 1 — End-to-end stub | Days 3–4 | Trigger → stub Engine → fake Verdict Card | ◐ (S-1.1, S-1.3, S-1.4, S-1.5, S-1.6 ✅) |
-| 2 — Real Engine MVP | Days 5–7 | 2 tools + Reasoner + Calibrator, real verdicts | ◐ (E-2.1, E-2.2, E-2.5, E-2.6 ✅) |
+| 2 — Real Engine MVP | Days 5–7 | 2 tools + Reasoner + Calibrator, real verdicts | ◐ (E-2.1, E-2.2, E-2.5, E-2.6, E-2.7 ✅) |
 | 3 — Full investigation | Days 8–10 | All 5 tools + memory + cold-start + personalities | ☐ |
 | 4 — Surfaces & polish | Days 11–12 | Dashboard, wizard, menu actions, error states | ☐ |
 | 5 — Eval & demo | Days 13–14 | Eval harness wired, demo script, submission | ☐ |
@@ -196,10 +196,17 @@ Goal: Replace the stub with real investigation logic — two tools, a real Reaso
 - **Deps:** None (no I/O).
 - **Done 2026-05-13:** `engine/orchestrator/strategy.py` exports `StrategyInputs` (frozen dataclass — reporter_count, velocity_zscore, user_risk_tier, rule_match_score, personality, tier_override, cold_start) and `StrategyDecision` (frozen — tier, tool_budget, time_budget_ms, cost_budget_usd, reasoner_required, rationale). Decision order: (1) moderator `tier_override` setting wins, with cold-start floor on FAST→STANDARD per Specs §12.1; (2) DEEP triggers if `reporter_count ≥ threshold`, `velocity_zscore ≥ threshold`, or `user_risk_tier == "watched"` — personality nudges shift thresholds (strict −1 / lenient +1); (3) FAST eligible only when single reporter + `velocity < 0.5` + `rule_match ≥ 0.9` + new/trusted user + not cold-start; (4) STANDARD default. Budget table pinned to Specs §7.1: FAST=2/800ms/$0.003 no-reasoner, STANDARD=4/3s/$0.012 with-reasoner, DEEP=6/6s/$0.030 with-reasoner. Import-time `assert` cross-checks that every `StrategyTier` literal has a budget entry. **100% branch coverage** (26 tests including: parametrized override surface, cold-start vetoes, every DEEP signal in isolation + combined, every FAST-blocker, personality nudges in both directions, locked budget table per tier, `<50ms × 1000 calls` perf bound, frozen-dataclass immutability, defensive override-value error path).
 
-### E-2.7 — Orchestrator loop ☐
+### E-2.7 — Orchestrator loop ✅
 - **Spec:** [04-InvestigationEngine.md §3](04-InvestigationEngine.md)
 - **Acceptance:** Runs tools per tier plan, enforces budgets, early-stops on convergence, returns full evidence + timeline. Tests cover: happy path, early stop, budget exit, single-tool failure.
 - **Deps:** E-2.5, E-2.6.
+- **Done 2026-05-13:** `engine/orchestrator/loop.py` exports `Orchestrator` (stateless, safe to share across requests) and `OrchestratorResult` (frozen — correlation_id, subreddit_id, tier, accumulator, started_at/completed_at datetimes, total_latency_ms, tools_run, early_stopped, stop_reason, plan).
+  - **Default plans per Specs §7.1:** FAST=[policy_match, report_velocity], STANDARD=[+user_history, prior_actions], DEEP=[+thread_context].
+  - **Loop semantics:** budget pre-check (tool_budget + time_budget_ms) before each iteration → unregistered tool becomes `status=skipped` evidence (no crash) → tool runs with `except Exception` isolation, exceptions captured as `failure` evidence with `error` populated → accumulator append → convergence check.
+  - **Convergence policy:** 1 strong-signal success on FAST, 2 on STANDARD/DEEP. A "strong signal" is `result.detail["signal"] == "high"` — tools opt in by setting it.
+  - **Clock injection** via `clock: Callable[[], float]` parameter (default `time.perf_counter`) so tests can drive elapsed time deterministically.
+  - **Structured logging** at start, per-tool, on stop, on completion — every line carries correlation_id + subreddit_id + tier.
+  - 14 tests cover: happy path (full 4-tool plan completes), timestamps recorded, STANDARD converges after 2 strong signals (skips remaining tools), FAST converges after 1, no convergence when no signal set, tool_budget exit, time_budget exit (via FakeClock), single-tool exception doesn't abort (subsequent tools still run, failure carries `RuntimeError` + msg), failures excluded from `successful_entries()` (ADR-0003), unregistered tool → skipped not crash, custom plan overrides tier default, `default_plan()` per tier + unknown-tier raises, **orchestrator is reusable** across investigations (fresh accumulator per `run()`, ev-1 resets). **100% statement + branch coverage on `loop.py`**. ruff + mypy --strict + 96 tests all green.
 
 ### E-2.8 — Reasoner prompt v1.0 ☐
 - **Spec:** [06-AILayer.md §4.2](06-AILayer.md), [Specs.md §7.5 + §8.3](Specs.md)
