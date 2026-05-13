@@ -14,7 +14,7 @@
 |---|---|---|---|
 | 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ✅ (all 10 tasks) |
 | 1 — End-to-end stub | Days 3–4 | Trigger → stub Engine → fake Verdict Card | ◐ (S-1.1, S-1.3, S-1.4, S-1.5, S-1.6 ✅) |
-| 2 — Real Engine MVP | Days 5–7 | 2 tools + Reasoner + Calibrator, real verdicts | ◐ (E-2.1, E-2.2, E-2.6 ✅) |
+| 2 — Real Engine MVP | Days 5–7 | 2 tools + Reasoner + Calibrator, real verdicts | ◐ (E-2.1, E-2.2, E-2.5, E-2.6 ✅) |
 | 3 — Full investigation | Days 8–10 | All 5 tools + memory + cold-start + personalities | ☐ |
 | 4 — Surfaces & polish | Days 11–12 | Dashboard, wizard, menu actions, error states | ☐ |
 | 5 — Eval & demo | Days 13–14 | Eval harness wired, demo script, submission | ☐ |
@@ -179,10 +179,16 @@ Goal: Replace the stub with real investigation logic — two tools, a real Reaso
 - **Acceptance:** Redis sliding-window count → z-score. <30 ms p95.
 - **Deps:** E-2.2.
 
-### E-2.5 — Tool Registry & Evidence Accumulator ☐
+### E-2.5 — Tool Registry & Evidence Accumulator ✅
 - **Spec:** [04-InvestigationEngine.md §4](04-InvestigationEngine.md), [Specs.md §7.3–7.4](Specs.md)
 - **Acceptance:** `engine/orchestrator/registry.py` registers tools by name. Accumulator produces stable `ev-N` IDs.
-- **Deps:** E-2.3, E-2.4.
+- **Deps:** ~~E-2.3, E-2.4~~ — built first as substrate; tools register *into* it.
+- **Done 2026-05-13:** `engine/orchestrator/tools.py` defines the full substrate:
+  - **`Tool` Protocol** (`@runtime_checkable`): `name: ToolName` property + `async run(ctx: ToolContext) -> ToolResult`. Concrete tools (E-2.3, E-2.4) hold DB/Redis/LLM clients as instance state injected at startup; the Orchestrator only sees the Protocol surface.
+  - **`ToolContext`** (frozen dataclass): subreddit_id, correlation_id, target_{kind,id,body,author_id} + cheap signals (reporter_count, rule_match_score) the Strategy Selector already computed.
+  - **`ToolResult`** (frozen): tool, status (`success`/`failure`/`skipped`/`timeout` per Specs §7.3), summary (≤200 char Verdict-Card line), detail JSON, latency_ms, error. `.is_terminal_failure()` helper for orchestrator branching.
+  - **`ToolRegistry`**: register / get / has / names (insertion-ordered) / `__len__` / `__contains__`. Duplicate registration raises ValueError; unknown name raises KeyError.
+  - **`EvidenceAccumulator`**: append-only, mints monotonic `ev-N` ids starting at 1, defensively copies `detail` dict on append so caller mutations can't poison the timeline. `by_id` lookup, `successful_entries()` filter (per ADR-0003 the Reasoner is only allowed to cite successes — failures show in the Timeline but never in citations), `__iter__`. 19 tests cover every behavior (parametrized terminal-failure detection, defensive-copy verification, multi-instance counter isolation, Protocol runtime check, async tool roundtrip via registry). 100% statement coverage; 98% branch (the only "missing" branches are Protocol method stubs which are unreachable by design).
 
 ### E-2.6 — Strategy Selector ✅
 - **Spec:** [04-InvestigationEngine.md §2](04-InvestigationEngine.md), [Specs.md §7.1](Specs.md)
