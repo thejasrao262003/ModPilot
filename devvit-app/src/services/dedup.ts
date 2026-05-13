@@ -29,16 +29,13 @@ export async function dedupForTarget(targetId: string): Promise<DedupResult> {
     .randomUUID()
     .slice(0, 8)}`;
 
-  // Devvit Redis's set() supports an `nx` flag; if the key already exists we
-  // read its value and return that as the existing correlation_id.
-  const stored = (await (
-    redis as unknown as {
-      set: (k: string, v: string, opts?: { nx?: boolean; expiration?: number }) => Promise<string | undefined>;
-    }
-  ).set(key, newCorrelationId, { nx: true, expiration: DEDUP_TTL_SECONDS })) as
-    | string
-    | undefined;
+  // Devvit Redis's SetOptions.expiration is a Date, not a TTL-in-seconds.
+  // The platform internally converts it to seconds-from-now.
+  const expiration = new Date(Date.now() + DEDUP_TTL_SECONDS * 1000);
+  const stored = await redis.set(key, newCorrelationId, { nx: true, expiration });
 
+  // With nx=true: if the key was set, the return matches what we wrote.
+  // If nx rejected (key exists), the platform returns undefined/empty.
   if (stored === newCorrelationId || stored === 'OK') {
     return { status: 'new', correlationId: newCorrelationId };
   }
