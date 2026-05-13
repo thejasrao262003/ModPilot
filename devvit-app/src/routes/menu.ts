@@ -1,7 +1,9 @@
 // ModPilot menu actions. Spec: docs/09-UX.md §9, docs/Specs.md §6.4.
-// Stubs become real handlers progressively. Today wiring: investigate-post and
-// investigate-comment do a real `user_history` lookup against Reddit's API so
-// we can shape the Engine's request from real data before S-1.2 lands.
+// Today's investigate-comment / investigate-post handlers create a custom
+// post via reddit.submitCustomPost and navigate the mod to it. Author-history
+// enrichment (validated earlier against u/trendy_guy2003) will move to the
+// engine side under I-3.1 — pulling it from the menu request keeps the
+// platform's OnAction RPC well under its time budget.
 
 import { Hono } from 'hono';
 import type { Context } from 'hono';
@@ -11,102 +13,85 @@ import type { JsonObject } from '@devvit/shared-types/json.js';
 
 export const menu = new Hono();
 
-type HistorySnapshot = {
-  authorId: string;
-  authorName: string | undefined;
-  createdAtUtc: number | undefined;
-  karmaTotal: number | undefined;
-  recentPosts: Array<{ id: string; title: string; subreddit: string; createdAt: number; score: number }>;
-  recentComments: Array<{ id: string; subreddit: string; postId: string; createdAt: number; score: number; bodyPreview: string }>;
-};
-
-async function fetchAuthorHistory(authorId: string): Promise<HistorySnapshot | { error: string }> {
-  const author = await reddit.getUserById(authorId as `t2_${string}`);
-  if (!author) return { error: `user ${authorId} not found` };
-
-  const [posts, comments] = await Promise.all([
-    reddit.getPostsByUser({ username: author.username, sort: 'new', limit: 10 }).all(),
-    reddit.getCommentsByUser({ username: author.username, sort: 'new', limit: 10 }).all(),
-  ]);
-
-  return {
-    authorId,
-    authorName: author.username,
-    createdAtUtc: author.createdAt?.getTime?.() ?? undefined,
-    karmaTotal: (author as unknown as { linkKarma?: number; commentKarma?: number }).linkKarma,
-    recentPosts: posts.map((p) => ({
-      id: p.id,
-      title: p.title,
-      subreddit: p.subredditName ?? '',
-      createdAt: p.createdAt?.getTime?.() ?? 0,
-      score: p.score ?? 0,
-    })),
-    recentComments: comments.map((c) => ({
-      id: c.id,
-      subreddit: c.subredditName ?? '',
-      postId: c.postId ?? '',
-      createdAt: c.createdAt?.getTime?.() ?? 0,
-      score: c.score ?? 0,
-      bodyPreview: (c.body ?? '').slice(0, 140),
-    })),
-  };
-}
-
 // U-4.4: "Investigate with ModPilot" — creates a Verdict Card custom post
-// rendered from public/index.html, then navigates the mod to it.
-// During S-1.4 the post fetches `/api/verdict/canned` (mirrors engine canned
-// verdict per Specs §10.2). S-1.2 will swap that for a real Engine call.
+// rendered from src/client/index.html, then navigates the mod to it.
+// Logs entry/exit at every step so we can isolate which call fails when the
+// platform reports "OnAction INTERNAL: status 36".
 menu.post('/investigate-post', async (c) => {
-  const request = await c.req.json<MenuItemRequest>();
-  const targetId = request.targetId as `t3_${string}`;
-  return investigateAndOpenVerdict(c, async () => {
+  console.log('modpilot.menu.investigate_post.entered');
+  try {
+    const request = await c.req.json<MenuItemRequest>();
+    const targetId = request.targetId as `t3_${string}`;
+    console.log('modpilot.menu.investigate_post.target', targetId);
+
     const post = await reddit.getPostById(targetId);
-    const history = await fetchAuthorHistory(post.authorId ?? '');
-    const authorName = 'authorName' in history ? history.authorName : 'unknown';
-    const correlationId = `inv-${Date.now()}-${targetId.slice(3, 10)}`;
+    console.log('modpilot.menu.investigate_post.got_post', { id: post.id, author: post.authorId });
+
     const subreddit = await reddit.getSubredditById(post.subredditId);
-    console.log('modpilot.menu.investigate_post', { target: targetId, correlation_id: correlationId });
-    return {
-      correlationId,
-      title: `ModPilot · investigating ${truncate(post.title, 48)}`,
-      subredditName: subreddit?.name ?? 'modpilotdemo',
-      target: {
-        kind: 'post',
-        id: post.id,
-        title: post.title,
-        author: authorName ?? '',
-        authorId: post.authorId ?? '',
-        subreddit: subreddit?.name ?? 'modpilotdemo',
-        report_count: post.numberOfReports >= 0 ? post.numberOfReports : 0,
-      } satisfies JsonObject,
+    const subredditName = subreddit?.name ?? 'ModPilotDev';
+    const correlationId = `inv-${Date.now()}-${targetId.slice(3, 10)}`;
+
+    const target: JsonObject = {
+      kind: 'post',
+      id: post.id,
+      title: post.title ?? '',
+      author: post.authorName ?? '',
+      authorId: post.authorId ?? '',
+      subreddit: subredditName,
+      report_count: post.numberOfReports >= 0 ? post.numberOfReports : 0,
     };
-  });
+
+    return await submitVerdictPost(c, {
+      correlationId,
+      title: `ModPilot · ${truncate(post.title ?? 'post', 48)}`,
+      subredditName,
+      target,
+    });
+  } catch (err) {
+    console.error('modpilot.menu.investigate_post.error', err instanceof Error ? err.stack : err);
+    return c.json<UiResponse>(
+      { showToast: { text: `Investigation failed: ${String(err)}` } },
+      200,
+    );
+  }
 });
 
 menu.post('/investigate-comment', async (c) => {
-  const request = await c.req.json<MenuItemRequest>();
-  const targetId = request.targetId as `t1_${string}`;
-  return investigateAndOpenVerdict(c, async () => {
+  console.log('modpilot.menu.investigate_comment.entered');
+  try {
+    const request = await c.req.json<MenuItemRequest>();
+    const targetId = request.targetId as `t1_${string}`;
+    console.log('modpilot.menu.investigate_comment.target', targetId);
+
     const comment = await reddit.getCommentById(targetId);
-    const history = await fetchAuthorHistory(comment.authorId ?? '');
-    const authorName = 'authorName' in history ? history.authorName : 'unknown';
-    const correlationId = `inv-${Date.now()}-${targetId.slice(3, 10)}`;
+    console.log('modpilot.menu.investigate_comment.got_comment', { id: comment.id });
+
     const subreddit = await reddit.getSubredditById(comment.subredditId);
-    console.log('modpilot.menu.investigate_comment', { target: targetId, correlation_id: correlationId });
-    return {
-      correlationId,
-      title: `ModPilot · investigating comment by u/${authorName}`,
-      subredditName: subreddit?.name ?? 'modpilotdemo',
-      target: {
-        kind: 'comment',
-        id: comment.id,
-        body: truncate(comment.body ?? '', 200),
-        author: authorName ?? '',
-        authorId: comment.authorId ?? '',
-        subreddit: subreddit?.name ?? 'modpilotdemo',
-      } satisfies JsonObject,
+    const subredditName = subreddit?.name ?? 'ModPilotDev';
+    const correlationId = `inv-${Date.now()}-${targetId.slice(3, 10)}`;
+
+    const target: JsonObject = {
+      kind: 'comment',
+      id: comment.id,
+      body: truncate(comment.body ?? '', 200),
+      author: comment.authorName ?? '',
+      authorId: comment.authorId ?? '',
+      subreddit: subredditName,
     };
-  });
+
+    return await submitVerdictPost(c, {
+      correlationId,
+      title: `ModPilot · comment by u/${comment.authorName ?? 'unknown'}`,
+      subredditName,
+      target,
+    });
+  } catch (err) {
+    console.error('modpilot.menu.investigate_comment.error', err instanceof Error ? err.stack : err);
+    return c.json<UiResponse>(
+      { showToast: { text: `Investigation failed: ${String(err)}` } },
+      200,
+    );
+  }
 });
 
 type InvestigationInputs = {
@@ -116,36 +101,30 @@ type InvestigationInputs = {
   target: JsonObject;
 };
 
-async function investigateAndOpenVerdict(
-  c: Context,
-  buildInputs: () => Promise<InvestigationInputs>,
-) {
-  try {
-    const inputs = await buildInputs();
-    const postData: JsonObject = {
-      target: inputs.target,
-      correlationId: inputs.correlationId,
-    };
-    const post = await reddit.submitCustomPost({
-      subredditName: inputs.subredditName,
-      title: inputs.title,
-      postData,
-      textFallback: { text: `ModPilot verdict for ${inputs.correlationId} — open on a supported client.` },
-    });
-    return c.json<UiResponse>(
-      {
-        navigateTo: post.permalink,
-        showToast: { text: 'Verdict ready — opening the case file…', appearance: 'success' },
-      },
-      200,
-    );
-  } catch (err) {
-    console.error('modpilot.menu.investigate.error', err);
-    return c.json<UiResponse>(
-      { showToast: { text: `Investigation failed: ${String(err)}` } },
-      200,
-    );
-  }
+async function submitVerdictPost(c: Context, inputs: InvestigationInputs) {
+  const postData: JsonObject = { target: inputs.target, correlationId: inputs.correlationId };
+  console.log('modpilot.menu.submit_custom_post.calling', {
+    subreddit: inputs.subredditName,
+    correlation_id: inputs.correlationId,
+    title: inputs.title,
+  });
+  const post = await reddit.submitCustomPost({
+    subredditName: inputs.subredditName,
+    title: inputs.title,
+    postData,
+    textFallback: { text: `ModPilot verdict ${inputs.correlationId}.` },
+  });
+  console.log('modpilot.menu.submit_custom_post.created', {
+    post_id: post.id,
+    permalink: post.permalink,
+  });
+  return c.json<UiResponse>(
+    {
+      navigateTo: post.permalink,
+      showToast: { text: 'Verdict ready — opening the case file…', appearance: 'success' },
+    },
+    200,
+  );
 }
 
 function truncate(s: string, n: number): string {
