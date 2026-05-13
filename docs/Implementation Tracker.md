@@ -48,7 +48,14 @@ Goal: Everything green-field needed *before* writing investigation logic.
 - **Spec:** [03-Devvit.md](03-Devvit.md), [adr/0005-devvit-web-not-blocks.md](adr/0005-devvit-web-not-blocks.md)
 - **Acceptance (revised):** `cd devvit-app && npm run build` succeeds. `devvit.json` declares ModPilot's triggers/menu/scheduler. Empty handler stubs in `src/routes/`.
 - **Deps:** F-0.3.
-- **Done 2026-05-13:** `npm create devvit@latest` redeemed Reddit auth token; scaffolded Devvit Web (Hono + Vite). `devvit.json` updated with 5 triggers (`onAppInstall/Upgrade/CommentReport/PostReport/ModAction`), 4 menu items per [09-UX.md §9](09-UX.md), 2 scheduler tasks (priority-rollup every 5min, feedback-batch nightly), and redis + http permissions. Stub handlers in `src/routes/triggers.ts`, `routes/menu.ts`, `routes/forms.ts`. Layer-purity rules added to `eslint.config.js`. `npm run type-check` + `npm run lint` + `npm run build` all clean. Architecture shift captured in ADR-0005.
+- **Done 2026-05-13:** `npm create devvit@latest` redeemed Reddit auth token; scaffolded Devvit Web (Hono + Vite). `devvit.json` updated with 5 triggers (`onAppInstall/Upgrade/CommentReport/PostReport/ModAction`), 4 menu items per [09-UX.md §9](09-UX.md), 2 scheduler tasks (priority-rollup every 5min, feedback-batch nightly), and redis + http permissions. Stub handlers in `src/routes/triggers.ts`, `routes/menu.ts`, `routes/forms.ts`, `routes/scheduler.ts`. Layer-purity rules added to `eslint.config.js`. `npm run type-check` + `npm run lint` + `npm run build` all clean. Architecture shift captured in ADR-0005.
+- **Live validation 2026-05-13 (r/ModPilotDev, playtest v0.0.1.8):** end-to-end deploy via `devvit playtest ModPilotDev` succeeded. Captured real payloads for:
+  - `onAppInstall` — `{ subreddit: { name: 'ModPilotDev' } }`
+  - `onModAction` — 5 distinct action types (`spamlink`, `addremovalreason`, `sticky` (cascades into `LOCK_COMMENT`+`DISTINGUISH_COMMENT`), `approvelink`, `dev_platform_app_*`). Full payload includes `targetUser`, `targetComment`, `targetPost`, `moderator`, `subreddit` — everything the Reasoner needs for the `prior_actions` tool.
+  - `onPostReport` — `{ post: { id, title, selftext, authorId, numReports, subredditId, ... }, subreddit, reason, type: 'PostReport' }`. `numReports` is pre-aggregated by the platform — no extra API call needed.
+  - `reddit.getUserById` + `getPostsByUser` + `getCommentsByUser` working end-to-end. Pulled u/trendy_guy2003 (`t2_ewyhkkhu`): 4.6-year-old account, karma=1, 2 near-duplicate posts in 4 min, zero comments — textbook sleeper-burner pattern. Validates the `user_history` tool's payload shape (see I-3.1 below).
+  - **Gotcha logged:** `reddit.getPostById().numberOfReports` returns **-1** from a menu-action context (no elevated mod scope). Authoritative `numReports` only available from the trigger payload itself. Inlined comment in `menu.ts:investigate-post` + future S-1.1 must cache trigger-payload values in Redis rather than re-fetching.
+  - **Bug fixed mid-validation:** scheduler tasks were declared in `devvit.json` but routes weren't registered — caught immediately by `404 /internal/scheduler/priority-rollup` in the cron log; fixed by adding `src/routes/scheduler.ts` + wiring in `src/index.ts`.
 
 ### F-0.5 — Engine FastAPI skeleton ✅
 - **Spec:** [Specs.md §10](Specs.md), [13-Infra.md](13-Infra.md)
@@ -198,6 +205,7 @@ Goal: Five tools, memory, cold-start, personalities, honest uncertainty.
 - **Spec:** [04-InvestigationEngine.md §5.3.3](04-InvestigationEngine.md), [05-Memory.md](05-Memory.md)
 - **Acceptance:** Reads `user_memory` Postgres row + Redis cache. Returns risk tier label (never raw score). Updates last_seen.
 - **Deps:** E-2.2, I-3.4.
+- **Reddit-API surface validated 2026-05-13 (Devvit-side, ahead of Python impl):** `devvit-app/src/routes/menu.ts:investigate-post` uses `reddit.getUserById` + `getPostsByUser({ sort: 'new', limit: 10 })` + `getCommentsByUser` to produce the `HistorySnapshot` shape the engine tool will need. Reference payload captured against u/trendy_guy2003 stored in playtest logs. Python `user_history` tool consumes the same shape after Devvit sends it (or, more likely, fetches it server-side from the engine via Reddit OAuth).
 
 ### I-3.2 — Tool: `prior_actions` ☐
 - **Spec:** [04-InvestigationEngine.md §5.3.4](04-InvestigationEngine.md)

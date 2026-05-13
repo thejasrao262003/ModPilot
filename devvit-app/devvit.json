@@ -63,6 +63,9 @@
     "build": "vite build",
     "dev": "vite build --watch"
   },
+  "dev": {
+    "subreddit": "ModPilotDev"
+  },
   "permissions": {
     "reddit": true,
     "redis": true,

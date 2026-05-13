@@ -19,27 +19,26 @@ triggers.post('/on-app-upgrade', async (c) => {
 });
 
 // === S-1.1: real implementation lands here ===
+// During F-0.4 we log the full payload so we can shape the Engine request
+// from real data instead of guesses.
 triggers.post('/on-comment-report', async (c) => {
-  const body = (await c.req.json()) as { comment?: { id?: string }; subreddit?: { name?: string } };
-  console.log('modpilot.comment_report', {
-    comment_id: body.comment?.id,
-    subreddit: body.subreddit?.name,
-  });
+  const body = (await c.req.json()) as Record<string, unknown>;
+  console.log('modpilot.comment_report', JSON.stringify(body, null, 2));
   // TODO(S-1.1): dedup via Devvit KV `pending_investigation:{comment_id}`
   // TODO(S-1.2): call Engine /investigate with HMAC-signed request
   return c.json<TriggerResponse>({ status: 'success' }, 200);
 });
 
 triggers.post('/on-post-report', async (c) => {
-  const body = (await c.req.json()) as { post?: { id?: string }; subreddit?: { name?: string } };
-  console.log('modpilot.post_report', { post_id: body.post?.id, subreddit: body.subreddit?.name });
+  const body = (await c.req.json()) as Record<string, unknown>;
+  console.log('modpilot.post_report', JSON.stringify(body, null, 2));
   // TODO(S-1.1): same pipeline as comment report
   return c.json<TriggerResponse>({ status: 'success' }, 200);
 });
 
 triggers.post('/on-mod-action', async (c) => {
-  const body = (await c.req.json()) as { action?: string; moderator?: { name?: string } };
-  console.log('modpilot.mod_action', { action: body.action, moderator: body.moderator?.name });
+  const body = (await c.req.json()) as Record<string, unknown>;
+  console.log('modpilot.mod_action', JSON.stringify(body, null, 2));
   // TODO(S-1.6): record feedback to Engine /feedback for ModPilot alignment
   return c.json<TriggerResponse>({ status: 'success' }, 200);
 });
