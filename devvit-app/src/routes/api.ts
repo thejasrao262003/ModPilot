@@ -2,9 +2,64 @@
 // The verdict UI in public/ fetches /api/verdict/canned to populate itself.
 
 import { Hono } from 'hono';
-import { context } from '@devvit/web/server';
+import { context, redis, reddit } from '@devvit/web/server';
 
 export const api = new Hono();
+
+// S-1.6: feedback recording. The Verdict Card UI POSTs here when a mod
+// clicks Remove / Approve / Escalate / Lock. Persists to Devvit Redis under
+// `feedback:{correlation_id}` for the engine to aggregate (V-5.x will
+// proxy to the engine's /feedback once S-1.2's tunnel is in place).
+api.post('/feedback', async (c) => {
+  const body = (await c.req.json()) as {
+    correlation_id?: string;
+    mod_action?: 'REMOVE' | 'APPROVE' | 'ESCALATE' | 'LOCK';
+    recommendation?: string;
+    source?: 'verdict_card' | 'reddit_native';
+  };
+
+  if (!body.correlation_id || !body.mod_action) {
+    return c.json(
+      { ok: false, error: { code: 'BAD_REQUEST', message: 'correlation_id + mod_action required', retryable: false } },
+      400,
+    );
+  }
+
+  // Identify the moderator from request context where possible.
+  const moderator = await safeCurrentUsername();
+
+  const aligned =
+    typeof body.recommendation === 'string'
+      ? body.mod_action === body.recommendation.toUpperCase()
+      : null;
+
+  const record = {
+    correlation_id: body.correlation_id,
+    mod_action: body.mod_action,
+    recommendation: body.recommendation ?? '',
+    source: body.source ?? 'verdict_card',
+    moderator: moderator ?? 'unknown',
+    aligned: aligned === null ? '' : String(aligned),
+    at: new Date().toISOString(),
+  };
+
+  await redis.hSet(`feedback:${body.correlation_id}`, record);
+  await redis.expire(`feedback:${body.correlation_id}`, 60 * 60 * 24 * 7); // 7d retention
+
+  console.log('modpilot.feedback.recorded', record);
+  return c.json({ ok: true, data: record }, 200);
+});
+
+async function safeCurrentUsername(): Promise<string | undefined> {
+  try {
+    const userId = context.userId;
+    if (!userId) return undefined;
+    const user = await reddit.getUserById(userId as `t2_${string}`);
+    return user?.username;
+  } catch {
+    return undefined;
+  }
+}
 
 // Canned verdict — mirrors engine/api/canned.py so both UIs render identically.
 // S-1.2 will replace this with a real call to the Investigation Engine.

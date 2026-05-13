@@ -369,6 +369,21 @@ body::before {
 .btn.is-primary.high { background: var(--risk-high); border-color: var(--risk-high); }
 .btn.is-primary.medium { background: var(--risk-medium); border-color: var(--risk-medium); }
 .btn.is-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px -4px rgba(27, 24, 18, 0.4); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.action-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 8px 12px;
+  border-radius: 2px;
+  border: 1px solid var(--rule-hair);
+  background: var(--paper-deep);
+  color: var(--ink-mid);
+  animation: rise 0.3s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.action-status.success { color: var(--risk-low); background: var(--risk-low-soft); border-color: rgba(47, 122, 60, 0.3); }
+.action-status.error { color: var(--risk-high); background: var(--risk-high-soft); border-color: rgba(192, 57, 43, 0.3); }
 
 .v-footer {
   display: flex;

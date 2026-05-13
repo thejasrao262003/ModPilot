@@ -161,9 +161,47 @@ function escapeHtml(s) {
     .replace(/'/g, '&#39;');
 }
 
-function onAction(label, verdict) {
-  // S-1.6 will POST to /api/feedback. For now: visible feedback only.
-  alert(`${label} clicked. (S-1.6 will record this as feedback.)\n\nVerdict: ${verdict.recommendation} at ${Math.round(verdict.calibrated_confidence * 100)}% conf.`);
+async function onAction(label, verdict) {
+  const buttons = document.querySelectorAll('#actions .btn');
+  buttons.forEach((b) => { b.disabled = true; });
+  const status = ensureStatusEl();
+  status.textContent = `Recording ${label.toLowerCase()}…`;
+  status.className = 'action-status pending';
+  try {
+    const res = await fetch('/api/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        correlation_id: verdict.correlation_id,
+        mod_action: label.toUpperCase(),
+        recommendation: verdict.recommendation,
+        source: 'verdict_card',
+      }),
+    });
+    const body = await res.json();
+    if (!res.ok || !body.ok) throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+    const aligned = body.data.aligned === 'true';
+    status.textContent = aligned
+      ? `${label} recorded · aligned with ModPilot ✓`
+      : `${label} recorded · overrode ModPilot's ${verdict.recommendation.toLowerCase()}`;
+    status.className = 'action-status success';
+  } catch (err) {
+    console.error('modpilot.feedback.failed', err);
+    status.textContent = `Failed to record: ${String(err)}`;
+    status.className = 'action-status error';
+    buttons.forEach((b) => { b.disabled = false; });
+  }
+}
+
+function ensureStatusEl() {
+  let el = document.getElementById('action-status');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'action-status';
+    el.className = 'action-status';
+    document.getElementById('actions').insertAdjacentElement('afterend', el);
+  }
+  return el;
 }
 
 async function load() {

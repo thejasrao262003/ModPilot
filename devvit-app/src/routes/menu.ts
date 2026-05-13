@@ -129,8 +129,8 @@ async function investigateAndOpenVerdict(
     const post = await reddit.submitCustomPost({
       subredditName: inputs.subredditName,
       title: inputs.title,
-      splash: { appDisplayName: 'ModPilot' },
       postData,
+      textFallback: { text: `ModPilot verdict for ${inputs.correlationId} — open on a supported client.` },
     });
     return c.json<UiResponse>(
       {

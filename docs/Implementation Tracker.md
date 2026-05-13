@@ -13,13 +13,13 @@
 | Phase | Window | Goal | Status |
 |---|---|---|---|
 | 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ✅ (all 10 tasks) |
-| 1 — End-to-end stub | Days 3–4 | Trigger → stub Engine → fake Verdict Card | ◐ (S-1.3, S-1.4, S-1.5 ✅) |
+| 1 — End-to-end stub | Days 3–4 | Trigger → stub Engine → fake Verdict Card | ◐ (S-1.3, S-1.4, S-1.5, S-1.6 ✅) |
 | 2 — Real Engine MVP | Days 5–7 | 2 tools + Reasoner + Calibrator, real verdicts | ☐ |
 | 3 — Full investigation | Days 8–10 | All 5 tools + memory + cold-start + personalities | ☐ |
 | 4 — Surfaces & polish | Days 11–12 | Dashboard, wizard, menu actions, error states | ☐ |
 | 5 — Eval & demo | Days 13–14 | Eval harness wired, demo script, submission | ☐ |
 
-**Current focus:** Phase 1 in flight. S-1.3 + S-1.4 + S-1.5 ✅ — Verdict Card + Timeline live on r/ModPilotDev playtest v0.0.1.26. Next: S-1.1 (CommentReport real handler) + S-1.2 (Devvit → Engine HTTP client; needs a tunnel for local engine access) + S-1.6 (ModAction → feedback).
+**Current focus:** Phase 1 in flight. S-1.3 + S-1.4 + S-1.5 + S-1.6 ✅ — Verdict Card + Timeline + feedback recording live on r/ModPilotDev playtest v0.0.1.36. Next: S-1.1 (CommentReport real handler with KV dedup, no tunnel needed) and S-1.2 (Devvit → Engine HTTP client; needs a tunnel for local engine access) → S-1.7 demo.
 
 ---
 
@@ -128,10 +128,14 @@ Goal: A `CommentReport` produces a (fake) Verdict Card visible to the mod. No re
 - **Deps:** F-0.10, S-1.3.
 - **Done 2026-05-13:** Bundled with S-1.4 in `src/client/`. Timeline renders one row per tool with status glyph (`✓`/`✗`/`⊘`/`⏱`), past-tense verb from the payload, tabular-num latency, and clickable `ev·N` chips. Sticky Verdict Block on the right shows Reasoner rationale with inline citation chips (regex-replaced from `[ev-N]` in the rationale text), model + tokens + cost line, calibrated confidence %, and the four-bullet confidence breakdown as horizontal bar charts. Expand/collapse via the card's "View reasoning ▾" toggle.
 
-### S-1.6 — `ModAction` trigger → feedback record ☐
+### S-1.6 — `ModAction` trigger → feedback record ✅
 - **Spec:** [03-Devvit.md](03-Devvit.md), [Specs.md §9.1](Specs.md)
 - **Acceptance:** When mod clicks Remove/Approve/Escalate, trigger captures alignment and POSTs to `/feedback`. Engine stub logs the event.
 - **Deps:** S-1.4.
+- **Done 2026-05-13:** Two paths recorded into Devvit Redis under `feedback:*` keys (7d retention):
+  1. **Verdict Card buttons** — `src/client/main.js#onAction` POSTs `{ correlation_id, mod_action, recommendation, source: 'verdict_card' }` to `/api/feedback`. The server records the alignment (`aligned = mod_action === recommendation`) and surfaces it back to the UI: action buttons disable while the request is in flight, then a status chip shows "aligned with ModPilot ✓" or "overrode ModPilot's *recommendation*". Failure path re-enables the buttons and shows the error.
+  2. **Reddit-native mod actions** — `src/routes/triggers.ts#on-mod-action` maps Reddit's `removelink`/`removecomment`/`spamlink`/`spamcomment`/`approve*`/`lock` strings to our 4-action enum and writes to `feedback:reddit-native:{target_id}`. Engine aggregation joins on `target_id` at calibration time.
+  - Engine-side `/feedback` proxy lands in S-1.2 alongside the tunnel; until then both paths persist locally in Devvit KV.
 
 ### S-1.7 — End-to-end demo ☐
 - **Spec:** none new
