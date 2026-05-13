@@ -17,10 +17,38 @@ jobs:
   engine:
     name: Engine — ruff + mypy + pytest
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
     defaults:
       run:
         working-directory: engine
+
+    # Service containers mirror docker-compose.yml so test_postgres.py and
+    # test_redis.py exercise the real stores. Without these, the DB tests
+    # hit ECONNREFUSED on the runner (Phase 2 E-2.2 brought them in).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: modpilot
+          POSTGRES_PASSWORD: modpilot
+          POSTGRES_DB: modpilot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U modpilot"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -39,9 +67,16 @@ jobs:
       - name: Mypy strict
         run: uv run mypy --strict api observability store llm
 
+      - name: Migrate schema (Alembic)
+        env:
+          DATABASE_URL: postgresql+asyncpg://modpilot:modpilot@localhost:5432/modpilot
+        run: uv run alembic upgrade head
+
       - name: Pytest (live LLM tests skipped — ENABLE_LIVE_LLM_TESTS unset)
         env:
           ENV: development
+          DATABASE_URL: postgresql+asyncpg://modpilot:modpilot@localhost:5432/modpilot
+          REDIS_URL: redis://localhost:6379/0
         run: uv run pytest -q
 
   devvit:
