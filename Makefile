@@ -35,15 +35,23 @@ devvit-dev:
 	cd devvit-app && npx devvit upload
 
 lint:
-	cd engine && uv run ruff check . && uv run mypy --strict .
-	cd devvit-app && npx eslint src && npx tsc --noEmit
+	cd engine && uv run ruff check . && uv run mypy --strict api observability store llm
+	cd devvit-app && npm run lint && npm run type-check
 
 test:
 	cd engine && uv run pytest
-	cd devvit-app && npx jest
+	cd devvit-app && npm test
 
 eval:
 	cd engine && uv run python -m eval.run --suite all
+
+enforce:
+	./scripts/check-banned-terms.sh
+	./scripts/check-no-inline-hex.sh
+
+# Run everything CI runs — match for parity.
+check: lint test enforce
+	@echo "✓ All checks passed."
 
 clean:
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

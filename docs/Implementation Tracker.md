@@ -12,14 +12,14 @@
 
 | Phase | Window | Goal | Status |
 |---|---|---|---|
-| 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ◐ (F-0.2, F-0.3, F-0.4, F-0.5, F-0.6, F-0.7, F-0.8 ✅) |
+| 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ✅ (all 10 tasks) |
 | 1 — End-to-end stub | Days 3–4 | Trigger → stub Engine → fake Verdict Card | ☐ |
 | 2 — Real Engine MVP | Days 5–7 | 2 tools + Reasoner + Calibrator, real verdicts | ☐ |
 | 3 — Full investigation | Days 8–10 | All 5 tools + memory + cold-start + personalities | ☐ |
 | 4 — Surfaces & polish | Days 11–12 | Dashboard, wizard, menu actions, error states | ☐ |
 | 5 — Eval & demo | Days 13–14 | Eval harness wired, demo script, submission | ☐ |
 
-**Current focus:** F-0.3 ✅ done. Next: F-0.4 (needs `npm install -g devvit`) or F-0.5/F-0.7 (engine skeleton — `/health` already up).
+**Current focus:** 🎉 **Phase 0 complete (Day 2 of 14).** Next: Phase 1 — End-to-end stub. S-1.1 (CommentReport trigger) and S-1.2 (Devvit → Engine client) are the unblocked entry points.
 
 ---
 
@@ -27,10 +27,10 @@
 
 Goal: Everything green-field needed *before* writing investigation logic.
 
-### F-0.1 — Lock the 10 blocking docs ◐
+### F-0.1 — Lock the 10 blocking docs ✅
 - **Spec:** [CLAUDE.md](../CLAUDE.md) Current Phase
 - **Acceptance:** [01-Product.md](01-Product.md), [02-Architecture.md](02-Architecture.md), [03-Devvit.md](03-Devvit.md), [04-InvestigationEngine.md](04-InvestigationEngine.md), [05-Memory.md](05-Memory.md), [06-AILayer.md](06-AILayer.md), [07-DataLayer.md](07-DataLayer.md), [09-UX.md](09-UX.md), root [CLAUDE.md](../CLAUDE.md), foundational ADRs — all marked stable.
-- **Notes:** ADR directory not yet scaffolded — see F-0.2.
+- **Done 2026-05-13:** All 15 area docs present and stable. 5 ADRs landed (0001 devvit+backend split, 0002 no online RL, 0003 evidence citation, 0004 HITL mandatory, 0005 Devvit Web not Blocks). `docs/Glossary.md` covers terminology authority. `docs/Specs.md` provides one-page-above spec. **Doc-sync debt acknowledged:** 03-Devvit, Specs §6, 09-UX §1.5 still reference Devvit Blocks in places — sweep happens progressively per ADR-0005 / [14-Engineering.md §7.8](14-Engineering.md).
 
 ### F-0.2 — Scaffold `docs/Glossary.md` + `docs/adr/` ✅
 - **Spec:** [CLAUDE.md](../CLAUDE.md) Repo Reality Check
@@ -82,15 +82,17 @@ Goal: Everything green-field needed *before* writing investigation logic.
 - **Done 2026-05-13:** `engine/llm/client.py` defines the `LLMClient` Protocol per [Specs.md §8.2](Specs.md) with `Role` (`StrEnum`), `Message`, `LLMResponse`. `engine/llm/gemini.py` implements it on `google-genai`'s async API, with per-model price table (Pro $1.25/$10 per 1M; Flash $0.075/$0.30 per 1M), token-count + latency + cost on every response, structured logs (`llm.call.started`/`.succeeded`/`.timeout`), and an optional `thinking_budget` parameter for fine-grained control. Live tests gated on `ENABLE_LIVE_LLM_TESTS=true` — both Flash (thinking_budget=0, "What color is the sky?" → "Blue") and Pro (thinking_budget=128, "Reply with: pong" → contains "pong") pass against the real API in ~5s combined.
 - **Production insight surfaced live:** `gemini-2.5-pro` is **thinking-only** — `thinking_budget=0` returns HTTP 400. Reasoner calls must allocate budget for thinking + output (~256+ recommended). `gemini-2.5-flash` allows disabling thinking and we should default Flash summarizer calls to `thinking_budget=0`. Captured in module docstring of `gemini.py`.
 
-### F-0.9 — CI gates ☐
+### F-0.9 — CI gates ✅
 - **Spec:** [14-Engineering.md §6](14-Engineering.md)
 - **Acceptance:** GitHub Actions runs `ruff`, `mypy --strict`, `eslint`, `tsc --noEmit`, `pytest`, `jest` on PR. Total <5 min on a no-op PR.
 - **Deps:** F-0.3.
+- **Done 2026-05-13:** `.github/workflows/ci.yml` with three parallel jobs: **engine** (ruff + mypy --strict + pytest), **devvit** (eslint + tsc --build + vite build — Reddit's scaffold uses vitest not jest; tests are pending so `npm test` is excluded for now), **enforce** (banned-terminology + no-inline-hex shell checks). All three run on every push to main and every PR. `concurrency` cancels in-progress runs on new pushes. Local parity via `make check`. Pytest auto-skips `llm/test_gemini.py::*` when `ENABLE_LIVE_LLM_TESTS` is unset, so CI doesn't need a Gemini key.
 
-### F-0.10 — Design tokens + copy module ☐
+### F-0.10 — Design tokens + copy module ✅
 - **Spec:** [09-UX.md §2 + §15.8-9](09-UX.md)
 - **Acceptance:** `devvit-app/src/ui/tokens.ts` ports values from [`mockups/moderator-ui.html`](../mockups/moderator-ui.html) + canonical risk hexes. `ui/copy.ts` has the 5 copy patterns from [09-UX.md §4.7](09-UX.md) and the "I'm unsure" string from §6.3. Lint blocks inline color/string literals in components.
 - **Deps:** F-0.4.
+- **Done 2026-05-13:** `devvit-app/src/ui/tokens.ts` exports `color` (canonical riskHigh/Medium/Low + muted variants + paper/ink/surface palette from the mockup), `spacing`, `radius`, `font`, `fontSize`, `letterSpacing` as `as const` namespaces with derived types. `devvit-app/src/ui/copy.ts` exports every user-facing string grouped by concern: `recommendation` (the 5 phrasings from §4.7), `uncertainty.badge`/`marginalia` (§6.3), `action`/`confirm`/`toast` (§10.1), `toolVerb` (§5.4 — full enum-mapped), `confidenceLabel`/`confidenceTier`, `coldStart`/`empty`/`error`/`cardState`/`timelineExit` (§§11, 12, 4.6, 5.5), `dashboard` (§8), `menu` (§9). **Enforcement:** `scripts/check-no-inline-hex.sh` (CI job) blocks `#hex` outside `ui/tokens.ts`; `scripts/check-banned-terms.sh` blocks Glossary §1 banned terms across `devvit-app/src/` and `engine/llm/prompts/`. Both pass on current code.
 
 ---
 

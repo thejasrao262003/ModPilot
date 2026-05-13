@@ -1,0 +1,85 @@
+name: CI
+
+# F-0.9: ruff + mypy + pytest (Python) + eslint + tsc + vitest (TS) + cross-cutting
+# enforcement (banned terms, inline hex). Target <5 min on a no-op PR.
+# Detail: docs/14-Engineering.md §6, docs/Implementation Tracker.md F-0.9.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine:
+    name: Engine — ruff + mypy + pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.9.27"
+          enable-cache: true
+
+      - name: Sync deps
+        run: uv sync --extra dev --frozen || uv sync --extra dev
+
+      - name: Ruff
+        run: uv run ruff check .
+
+      - name: Mypy strict
+        run: uv run mypy --strict api observability store llm
+
+      - name: Pytest (live LLM tests skipped — ENABLE_LIVE_LLM_TESTS unset)
+        env:
+          ENV: development
+        run: uv run pytest -q
+
+  devvit:
+    name: Devvit — eslint + tsc + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    defaults:
+      run:
+        working-directory: devvit-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: devvit-app/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: TypeScript build
+        run: npm run type-check
+
+      - name: Vite build
+        run: npm run build
+
+  enforce:
+    name: Enforce — banned terms + inline hex
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Banned terminology (docs/Glossary.md §1)
+        run: ./scripts/check-banned-terms.sh
+      - name: Inline hex literals (docs/09-UX.md §15.9)
+        run: ./scripts/check-no-inline-hex.sh
