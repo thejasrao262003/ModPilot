@@ -19,6 +19,7 @@ from observability.logging import configure_logging, get_logger
 from orchestrator.loop import Orchestrator
 from orchestrator.prior_actions import PriorActionsTool
 from orchestrator.report_velocity import ReportVelocityTool
+from orchestrator.thread_context import ThreadContextTool
 from orchestrator.tools import ToolRegistry
 from orchestrator.user_history import UserHistoryTool
 from store.connections import close_postgres, close_redis, open_postgres, open_redis
@@ -60,16 +61,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.redis = await open_redis(settings)
     app.state.pg_sessions = make_sessionmaker(app.state.pg)
 
-    # E-2.11: build Tool Registry + Orchestrator + LLM client.
-    registry = ToolRegistry()
-    registry.register(ReportVelocityTool(app.state.redis))
-    registry.register(PriorActionsTool(app.state.pg_sessions))
-    registry.register(UserHistoryTool(app.state.pg_sessions))
-    # PolicyMatchTool requires embed + rules_text functions; registered when
-    # those are wired (post-MVP). Orchestrator records "skipped" for missing tools.
-    app.state.orchestrator = Orchestrator(registry)
-
     # LLM client — deferred import to avoid hard google-genai dep at import time.
+    # Built before the registry so LLM-using tools (thread_context) can register.
     if settings.gemini_api_key:
         from llm.gemini import GeminiClient  # noqa: PLC0415
 
@@ -77,6 +70,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     else:
         app.state.llm = None
         logger.warning("engine.no_llm", reason="GEMINI_API_KEY not set")
+
+    # E-2.11 + I-3.3: build Tool Registry + Orchestrator.
+    registry = ToolRegistry()
+    registry.register(ReportVelocityTool(app.state.redis))
+    registry.register(PriorActionsTool(app.state.pg_sessions))
+    registry.register(UserHistoryTool(app.state.pg_sessions))
+    if app.state.llm is not None:
+        registry.register(ThreadContextTool(app.state.llm, app.state.redis))
+    else:
+        logger.warning("engine.thread_context_disabled", reason="no LLM client")
+    # PolicyMatchTool requires embed + rules_text functions; registered when
+    # those are wired (post-MVP). Orchestrator records "skipped" for missing tools.
+    app.state.orchestrator = Orchestrator(registry)
 
     try:
         yield

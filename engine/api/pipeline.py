@@ -111,6 +111,8 @@ async def run_investigation(  # noqa: PLR0913
         target_author_id=req.target.author,
         reporter_count=req.report.reporter_count,
         rule_match_score=rule_match_score,
+        thread_id=req.context.thread_id,
+        thread_excerpts=tuple(req.context.thread_excerpts),
     )
     orch_result = await orchestrator.run(decision=decision, context=context)
     accumulator = orch_result.accumulator

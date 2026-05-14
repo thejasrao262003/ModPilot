@@ -94,7 +94,9 @@ async def test_zero_reports_returns_negative_zscore() -> None:
 
     assert result.status == "success"
     assert result.detail["reports_5m"] == 0
-    assert result.detail["z_score"] < 0
+    z_score = result.detail["z_score"]
+    assert isinstance(z_score, float)
+    assert z_score < 0
 
 
 @pytest.mark.asyncio

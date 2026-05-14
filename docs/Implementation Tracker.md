@@ -259,10 +259,17 @@ Goal: Five tools, memory, cold-start, personalities, honest uncertainty.
 - **Deps:** E-2.2.
 - **Impl:** `orchestrator/prior_actions.py` — queries completed investigations on same author. Registered in lifespan. 8 unit + 3 DB integration tests.
 
-### I-3.3 — Tool: `thread_context` ☐
+### I-3.3 — Tool: `thread_context` ✅
 - **Spec:** [04-InvestigationEngine.md §5.3.5](04-InvestigationEngine.md), [06-AILayer.md §2.2](06-AILayer.md)
 - **Acceptance:** For threads ≥10 comments, calls Gemini 2.5 Flash with summarizer prompt; returns structured arc/escalation/instigator/off-topic blob. Caches in Redis `summary:{thread_id}`.
 - **Deps:** F-0.8.
+- **Done 2026-05-13:** Three pieces landed:
+  - **Schema extension:** `ToolContext` gained `thread_id: str` + `thread_excerpts: tuple[str, ...]` (tuple for frozen-dataclass safety). Populated by `api/pipeline.py` from `InvestigateRequest.context`.
+  - **Prompt module `llm/prompts/summarizer.py`:** `ThreadSummary` Pydantic schema (arc 1–240 chars, escalation_turn `int|None`, instigator_candidates ≤5, off_topic bool, total_turns ≥0), `Summarizer` class mirroring `Reasoner` (Role.SUMMARIZER, max_tokens=512, timeout=5s, `thinking_budget=0` per the F-0.8 insight that Flash supports disabling thinking and we want sub-1.5s latency for the §2.2 target).
+  - **Tool `orchestrator/thread_context.py`:** `ThreadContextTool` — checks `len(thread_excerpts) >= 10` (configurable via `_MIN_COMMENTS_FOR_SUMMARY`); if short, returns `status="skipped"` with `detail.reason="below_min_comments"`. Otherwise: Redis cache-aside via `get_thread_summary` / `set_thread_summary`; LLM call failures captured as `status="failure"` with the exception preserved in `error`; cache get/set wrapped in `contextlib.suppress(Exception)` so Redis flaps don't break the tool. Sets `detail["signal"] = "high"` when `escalation_turn` is non-null — drives orchestrator convergence under E-2.7.
+  - **Wiring:** `api/main.py` reordered to build LLM client *before* the registry, then conditionally registers `ThreadContextTool(app.state.llm, app.state.redis)` only when a Gemini key is present; missing-LLM falls through to `orchestrator.tool.unregistered` skip path.
+  - **Tests (13):** short-thread skip (no LLM call), zero-comment boundary, cache hit (zero LLM calls, `from_cache=True`), corrupt-cache fall-through, cache miss → LLM call + Redis write, missing `thread_id` skips cache I/O but runs LLM, LLM-exception → failure status with no cache write, Redis-set ConnectionError still returns success, Redis-get ConnectionError falls through to LLM, neutral signal when `escalation_turn=None`, off-topic surfaces in summary line, 200-char truncation with `...` suffix, canonical tool name.
+  - All checks green: `ruff` + `mypy --strict orchestrator api observability store llm` + 333/333 tests (2 LLM skipped).
 
 ### I-3.4 — User & thread memory ingest ✅
 - **Spec:** [05-Memory.md](05-Memory.md)

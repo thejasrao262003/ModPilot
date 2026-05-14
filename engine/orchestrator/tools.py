@@ -49,6 +49,10 @@ class ToolContext:
     # policy_match can look at rule_match_score to short-circuit).
     reporter_count: int = 0
     rule_match_score: float = 0.0
+    # Thread context — used by `thread_context` tool (I-3.3). Populated
+    # by the API handler from InvestigateRequest.context.thread_excerpts.
+    thread_id: str = ""
+    thread_excerpts: tuple[str, ...] = ()
 
 
 # === Tool result =======================================================
