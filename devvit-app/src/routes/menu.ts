@@ -10,12 +10,27 @@ import type { Context } from 'hono';
 import type { MenuItemRequest, UiResponse } from '@devvit/web/shared';
 import { reddit, redis } from '@devvit/web/server';
 
+import { uncertainty } from '../ui/copy';
+
 export const menu = new Hono();
 
-// CANNED verdict — mirrors engine/api/canned.py + src/routes/api.ts so the
-// inline form summary, the Redis cache, and the (eventually-working) custom
-// post all serve the same data. S-1.2 swaps this for a real engine call.
-const CANNED = {
+// CANNED verdicts — mirror engine/api/canned.py + src/routes/api.ts. The
+// playtest can't reach the engine (no tunnel yet, S-1.2), so the menu picks
+// a verdict deterministically from the target_id hash. This gives us TWO
+// demoable paths — HIGH-confidence REMOVE and LOW-confidence "unsure" —
+// without adding mod-facing menu clutter. Same target always returns the
+// same verdict so demos are reproducible.
+
+type CannedVerdict = {
+  tier: 'FAST' | 'STANDARD' | 'DEEP';
+  risk_tier: 'HIGH' | 'MEDIUM' | 'LOW';
+  recommendation: 'REMOVE' | 'APPROVE' | 'ESCALATE' | 'LOCK' | 'NO_RECOMMENDATION';
+  calibrated_confidence: number;
+  rationale: string;
+  top_evidence: { id: string; summary: string }[];
+};
+
+const CANNED_HIGH: CannedVerdict = {
   tier: 'DEEP',
   risk_tier: 'HIGH',
   recommendation: 'REMOVE',
@@ -28,6 +43,30 @@ const CANNED = {
     { id: 'ev-5', summary: 'Thread escalation detected at turn 8' },
   ],
 };
+
+// I-3.7: honest uncertainty fixture. Calibrated < 0.60 — triggers the
+// "🌱 ModPilot is unsure — your call" UX per docs/09-UX.md §6.3.
+const CANNED_LOW: CannedVerdict = {
+  tier: 'STANDARD',
+  risk_tier: 'LOW',
+  recommendation: 'NO_RECOMMENDATION',
+  calibrated_confidence: 0.54,
+  rationale:
+    'Tone matches harassment patterns on two phrases [ev-6], but author has positive history (8 approvals, 0 removals) [ev-2]. Thread context is heated but on-topic [ev-5] — not brigading. Evidence is genuinely mixed.',
+  top_evidence: [
+    { id: 'ev-6', summary: 'Tone matches harassment patterns — but only on 2 phrases' },
+    { id: 'ev-2', summary: 'Author has positive history: 8 approvals, 0 removals' },
+    { id: 'ev-5', summary: 'Thread context: heated but on-topic — not brigading' },
+  ],
+};
+
+/** Pick HIGH vs LOW canned verdict deterministically from target_id. */
+function selectCanned(targetId: string): CannedVerdict {
+  // Sum charcodes mod 5; 0-1 → LOW (~40% rate), else HIGH. Stable per target.
+  let h = 0;
+  for (let i = 0; i < targetId.length; i++) h = (h + targetId.charCodeAt(i)) | 0;
+  return Math.abs(h) % 5 < 2 ? CANNED_LOW : CANNED_HIGH;
+}
 
 // U-4.4: "Investigate with ModPilot" — runs an investigation against the
 // target and shows the verdict inline via showForm. We tried the richer
@@ -110,6 +149,8 @@ type VerdictFormInputs = {
   reportCount: number;
 };
 
+const LOW_CONF_THRESHOLD = 0.6;
+
 async function showVerdictForm(c: Context, inputs: VerdictFormInputs): Promise<Response> {
   // Reuse the dedupe correlation_id if the target was triggered into the
   // pipeline by a report; otherwise mint a one-off for menu-initiated
@@ -117,7 +158,10 @@ async function showVerdictForm(c: Context, inputs: VerdictFormInputs): Promise<R
   const cached = await readTriggerContext(inputs.targetId);
   const correlationId =
     cached?.correlation_id ?? `inv-${Date.now()}-${inputs.targetId.slice(3, 10)}`;
-  const pct = Math.round(CANNED.calibrated_confidence * 100);
+
+  const verdict = selectCanned(inputs.targetId);
+  const pct = Math.round(verdict.calibrated_confidence * 100);
+  const isLowConf = verdict.calibrated_confidence < LOW_CONF_THRESHOLD;
 
   // Persist the canned verdict so S-1.6 feedback can join on correlation_id,
   // and so a future custom-post render can read it from KV.
@@ -127,10 +171,11 @@ async function showVerdictForm(c: Context, inputs: VerdictFormInputs): Promise<R
     target_kind: inputs.kind,
     target_title: inputs.title,
     target_author: inputs.author,
-    recommendation: CANNED.recommendation,
-    risk_tier: CANNED.risk_tier,
-    calibrated_confidence: String(CANNED.calibrated_confidence),
-    rationale: CANNED.rationale,
+    recommendation: verdict.recommendation,
+    risk_tier: verdict.risk_tier,
+    calibrated_confidence: String(verdict.calibrated_confidence),
+    rationale: verdict.rationale,
+    is_low_conf: String(isLowConf),
     created_at: new Date().toISOString(),
   });
   await redis.expire(`verdict:${correlationId}`, 60 * 60 * 24 * 7);
@@ -138,8 +183,9 @@ async function showVerdictForm(c: Context, inputs: VerdictFormInputs): Promise<R
   console.log('modpilot.menu.investigate.verdict_ready', {
     correlation_id: correlationId,
     target: inputs.targetId,
-    recommendation: CANNED.recommendation,
+    recommendation: verdict.recommendation,
     confidence_pct: pct,
+    low_conf: isLowConf,
   });
 
   return c.json<UiResponse>(
@@ -147,18 +193,36 @@ async function showVerdictForm(c: Context, inputs: VerdictFormInputs): Promise<R
       showForm: {
         name: 'verdictView',
         form: {
-          title: `🛡  ModPilot · ${CANNED.risk_tier} RISK · ${pct}% confidence`,
+          title: isLowConf
+            ? `🌱  ModPilot is unsure — ${pct}% confidence`
+            : `🛡  ModPilot · ${verdict.risk_tier} RISK · ${pct}% confidence`,
           acceptLabel: 'Close',
           cancelLabel: 'Close',
           fields: [
-            {
-              name: 'recommendation',
-              label: 'Recommendation',
-              type: 'string',
-              defaultValue: `${CANNED.recommendation}  (${CANNED.risk_tier} risk, ${pct}% confidence)`,
-              helpText: 'ModPilot recommends. You decide. Every action requires your click.',
-              disabled: true,
-            },
+            // I-3.7: LOW conf swaps the "Recommendation" field for the
+            // "Honest uncertainty" marginalia note from docs/09-UX.md §6.3.
+            // HIGH/MEDIUM keep the recommendation field with the explicit
+            // moderator-click reminder.
+            isLowConf
+              ? {
+                  name: 'unsure',
+                  label: '🌱 Honest uncertainty',
+                  type: 'paragraph',
+                  defaultValue: uncertainty.marginalia,
+                  helpText:
+                    'No action pre-selected. Evidence is mixed; your judgment matters here.',
+                  disabled: true,
+                }
+              : {
+                  name: 'recommendation',
+                  label: 'Recommendation',
+                  type: 'string',
+                  defaultValue:
+                    `${verdict.recommendation}  (${verdict.risk_tier} risk, ${pct}% confidence)`,
+                  helpText:
+                    'ModPilot recommends. You decide. Every action requires your click.',
+                  disabled: true,
+                },
             {
               name: 'target',
               label: inputs.kind === 'post' ? 'Reported post' : 'Reported comment',
@@ -168,30 +232,30 @@ async function showVerdictForm(c: Context, inputs: VerdictFormInputs): Promise<R
             },
             {
               name: 'evidence_1',
-              label: `Evidence [${CANNED.top_evidence[0]!.id}]`,
+              label: `Evidence [${verdict.top_evidence[0]!.id}]`,
               type: 'string',
-              defaultValue: CANNED.top_evidence[0]!.summary,
+              defaultValue: verdict.top_evidence[0]!.summary,
               disabled: true,
             },
             {
               name: 'evidence_2',
-              label: `Evidence [${CANNED.top_evidence[1]!.id}]`,
+              label: `Evidence [${verdict.top_evidence[1]!.id}]`,
               type: 'string',
-              defaultValue: CANNED.top_evidence[1]!.summary,
+              defaultValue: verdict.top_evidence[1]!.summary,
               disabled: true,
             },
             {
               name: 'evidence_3',
-              label: `Evidence [${CANNED.top_evidence[2]!.id}]`,
+              label: `Evidence [${verdict.top_evidence[2]!.id}]`,
               type: 'string',
-              defaultValue: CANNED.top_evidence[2]!.summary,
+              defaultValue: verdict.top_evidence[2]!.summary,
               disabled: true,
             },
             {
               name: 'rationale',
-              label: 'Reasoning',
+              label: isLowConf ? 'What I looked at' : 'Reasoning',
               type: 'paragraph',
-              defaultValue: CANNED.rationale,
+              defaultValue: verdict.rationale,
               disabled: true,
               helpText: `Correlation id: ${correlationId} · model: gemini-2.5-pro · cost $0.018`,
             },

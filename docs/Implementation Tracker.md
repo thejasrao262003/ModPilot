@@ -289,10 +289,16 @@ Goal: Five tools, memory, cold-start, personalities, honest uncertainty.
 - **Deps:** E-2.10.
 - **Impl:** `personalities/presets.py` — PersonalityPreset dataclass, STRICT/BALANCED/LENIENT presets with prompt_phrasing, deep thresholds, and confidence thresholds. Pipeline wires phrasing into Reasoner prompt. 12 tests.
 
-### I-3.7 — Honest uncertainty UX ☐
+### I-3.7 — Honest uncertainty UX ✅
 - **Spec:** [09-UX.md §6](09-UX.md), [Specs.md §11.4](Specs.md)
 - **Acceptance:** Calibrated conf <0.60 renders 🌱 chip + marginalia note + no primary button styling. Demo-ready.
 - **Deps:** E-2.10, S-1.4.
+- **Done 2026-05-14:** Two surfaces honor honest uncertainty now:
+  - **Rich custom-post UI** (`src/client/main.js`, already built in S-1.4) — already branches at `calibrated_confidence < 0.60`: pill becomes "Low conf." + dashed-top variant, recommendation chip swaps to "🌱 ModPilot is unsure — your call", marginalia note from `copy.ts:uncertainty.marginalia` renders, NO primary-action styling on any button. (Gated on V-5.5 production deploy.)
+  - **Form-modal UI** (`src/routes/menu.ts`, today's demoable path) — refactored `showVerdictForm` to branch on `calibrated_confidence < 0.60`. LOW path: title becomes `🌱  ModPilot is unsure — N% confidence`; the top "Recommendation" field is replaced with a `🌱 Honest uncertainty` paragraph showing `uncertainty.marginalia` verbatim from `ui/copy.ts`; helpText says "No action pre-selected. Evidence is mixed; your judgment matters here."; the rationale section is relabeled "What I looked at" (not "Reasoning") since there's no recommendation to reason toward. HIGH/MEDIUM path unchanged.
+  - **Demoability:** Two `CannedVerdict` fixtures (HIGH-conf REMOVE @ 92%, LOW-conf NO_RECOMMENDATION @ 54%) selected deterministically by `selectCanned(target_id)` via charcode-sum mod-5 hash (~40% of targets land LOW). Same target always renders the same verdict — reproducible demos with no menu clutter.
+  - **Verdict cache extended:** `verdict:{correlation_id}` Redis hash now also stores `is_low_conf` so the future custom-post path renders the same way.
+  - **Wire integrity:** `npm run type-check` + `npm run lint` + `npm run build` all clean; `scripts/check-banned-terms.sh` + `scripts/check-no-inline-hex.sh` both pass.
 
 ### I-3.8 — Resolved / re-reported card states ☐
 - **Spec:** [09-UX.md §4.6](09-UX.md)
