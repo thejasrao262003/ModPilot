@@ -421,3 +421,29 @@ async def append_audit(  # noqa: PLR0913 — append-only audit takes the full ev
         )
     )
     await session.flush()
+
+
+async def list_prior_actions_on_user(
+    session: AsyncSession,
+    *,
+    subreddit_id: str,
+    author_id: str,
+    limit: int = 5,
+) -> Sequence[m.Investigation]:
+    """Return last N completed investigations on `author_id` in this subreddit.
+
+    Used by the `prior_actions` tool (I-3.2, docs/04-InvestigationEngine.md §5.3.4).
+    Ordered newest-first. Only completed investigations with a verdict.
+    """
+    return (
+        await session.execute(
+            select(m.Investigation)
+            .where(
+                m.Investigation.subreddit_id == subreddit_id,
+                m.Investigation.target_author_id == author_id,
+                m.Investigation.status == "completed",
+            )
+            .order_by(m.Investigation.completed_at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()

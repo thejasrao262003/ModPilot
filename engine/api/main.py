@@ -17,6 +17,7 @@ from api.pipeline import PipelineResult, run_investigation
 from api.schemas import InvestigateRequest, InvestigateResponse
 from observability.logging import configure_logging, get_logger
 from orchestrator.loop import Orchestrator
+from orchestrator.prior_actions import PriorActionsTool
 from orchestrator.report_velocity import ReportVelocityTool
 from orchestrator.tools import ToolRegistry
 from store.connections import close_postgres, close_redis, open_postgres, open_redis
@@ -61,6 +62,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # E-2.11: build Tool Registry + Orchestrator + LLM client.
     registry = ToolRegistry()
     registry.register(ReportVelocityTool(app.state.redis))
+    registry.register(PriorActionsTool(app.state.pg_sessions))
     # PolicyMatchTool requires embed + rules_text functions; registered when
     # those are wired (post-MVP). Orchestrator records "skipped" for missing tools.
     app.state.orchestrator = Orchestrator(registry)

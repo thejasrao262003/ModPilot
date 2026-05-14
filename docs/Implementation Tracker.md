@@ -252,10 +252,11 @@ Goal: Five tools, memory, cold-start, personalities, honest uncertainty.
 - **Deps:** E-2.2, I-3.4.
 - **Reddit-API surface validated 2026-05-13 (Devvit-side, ahead of Python impl):** `devvit-app/src/routes/menu.ts:investigate-post` uses `reddit.getUserById` + `getPostsByUser({ sort: 'new', limit: 10 })` + `getCommentsByUser` to produce the `HistorySnapshot` shape the engine tool will need. Reference payload captured against u/trendy_guy2003 stored in playtest logs. Python `user_history` tool consumes the same shape after Devvit sends it (or, more likely, fetches it server-side from the engine via Reddit OAuth).
 
-### I-3.2 — Tool: `prior_actions` ☐
+### I-3.2 — Tool: `prior_actions` ✅
 - **Spec:** [04-InvestigationEngine.md §5.3.4](04-InvestigationEngine.md)
 - **Acceptance:** Reads `audit_log` for last N mod actions on this user in this subreddit. <120 ms.
 - **Deps:** E-2.2.
+- **Impl:** `orchestrator/prior_actions.py` — queries completed investigations on same author. Registered in lifespan. 8 unit + 3 DB integration tests.
 
 ### I-3.3 — Tool: `thread_context` ☐
 - **Spec:** [04-InvestigationEngine.md §5.3.5](04-InvestigationEngine.md), [06-AILayer.md §2.2](06-AILayer.md)
