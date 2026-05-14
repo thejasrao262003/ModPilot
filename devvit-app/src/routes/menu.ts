@@ -10,6 +10,7 @@ import type { Context } from 'hono';
 import type { MenuItemRequest, UiResponse } from '@devvit/web/shared';
 import { reddit, redis } from '@devvit/web/server';
 
+import { readReportStats, readResolution, relativeAgo } from '../services/dedup';
 import { uncertainty } from '../ui/copy';
 
 export const menu = new Hono();
@@ -163,6 +164,14 @@ async function showVerdictForm(c: Context, inputs: VerdictFormInputs): Promise<R
   const pct = Math.round(verdict.calibrated_confidence * 100);
   const isLowConf = verdict.calibrated_confidence < LOW_CONF_THRESHOLD;
 
+  // I-3.8: pull the two annotations.
+  const [reportStats, resolution] = await Promise.all([
+    readReportStats(inputs.targetId),
+    readResolution(inputs.targetId),
+  ]);
+  const reReportField = buildReReportField(reportStats);
+  const resolvedField = buildResolvedField(resolution);
+
   // Persist the canned verdict so S-1.6 feedback can join on correlation_id,
   // and so a future custom-post render can read it from KV.
   await redis.hSet(`verdict:${correlationId}`, {
@@ -188,17 +197,31 @@ async function showVerdictForm(c: Context, inputs: VerdictFormInputs): Promise<R
     low_conf: isLowConf,
   });
 
+  // Title flips when resolved — moderator already acted; we just acknowledge.
+  const title = resolution
+    ? `✓ Resolved · ${resolution.modAction.toLowerCase()} by u/${resolution.moderatorName}`
+    : isLowConf
+      ? `🌱  ModPilot is unsure — ${pct}% confidence`
+      : `🛡  ModPilot · ${verdict.risk_tier} RISK · ${pct}% confidence`;
+
+  // Build the field list. Re-report + resolved annotations land first so
+  // they're impossible to miss; both can appear if a target was reported,
+  // resolved, then reported again within the dedup window.
+  const fields = [
+    ...(reReportField ? [reReportField] : []),
+    ...(resolvedField ? [resolvedField] : []),
+  ];
+
   return c.json<UiResponse>(
     {
       showForm: {
         name: 'verdictView',
         form: {
-          title: isLowConf
-            ? `🌱  ModPilot is unsure — ${pct}% confidence`
-            : `🛡  ModPilot · ${verdict.risk_tier} RISK · ${pct}% confidence`,
+          title,
           acceptLabel: 'Close',
           cancelLabel: 'Close',
           fields: [
+            ...fields,
             // I-3.7: LOW conf swaps the "Recommendation" field for the
             // "Honest uncertainty" marginalia note from docs/09-UX.md §6.3.
             // HIGH/MEDIUM keep the recommendation field with the explicit
@@ -270,6 +293,57 @@ async function showVerdictForm(c: Context, inputs: VerdictFormInputs): Promise<R
 
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+// I-3.8: re-report annotation. Surfaces "Re-reported N times in M min" when
+// the dedup counter has crossed 2 within the 10-min window.
+type FormField = {
+  name: string;
+  label: string;
+  type: 'string' | 'paragraph';
+  defaultValue: string;
+  helpText?: string;
+  disabled: boolean;
+};
+
+function buildReReportField(
+  stats: { reportCount: number; firstReportedAt: string } | null,
+): FormField | null {
+  if (!stats || stats.reportCount < 2) return null;
+  const firstAt = new Date(stats.firstReportedAt);
+  const minutes = Math.max(
+    1,
+    Math.round((Date.now() - firstAt.getTime()) / 60_000),
+  );
+  return {
+    name: 're_report',
+    label: '⚠ Re-reported',
+    type: 'string',
+    defaultValue: `${stats.reportCount} reports in ${minutes} min`,
+    helpText:
+      'Multiple reporters within the 10-min dedup window. Velocity is a signal — see Evidence below.',
+    disabled: true,
+  };
+}
+
+// I-3.8: resolved-state header. After a mod takes action on a target, the
+// next "Investigate" surfaces "Removed by u/X N min ago" so the moderator
+// knows the case is closed (per docs/09-UX.md §4.6 "Resolved" card state).
+function buildResolvedField(
+  resolution: { modAction: string; moderatorName: string; resolvedAt: string } | null,
+): FormField | null {
+  if (!resolution) return null;
+  const verb = resolution.modAction.toLowerCase();
+  const ago = relativeAgo(resolution.resolvedAt);
+  return {
+    name: 'resolved',
+    label: '✓ Resolved',
+    type: 'string',
+    defaultValue: `${verb} by u/${resolution.moderatorName || 'unknown'} · ${ago}`,
+    helpText:
+      'A moderator already acted on this target. The verdict below is preserved for audit.',
+    disabled: true,
+  };
 }
 
 // U-4.5: "Summarize this thread" — modal with arc/escalation/instigator/off-topic.

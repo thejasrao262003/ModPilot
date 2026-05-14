@@ -155,8 +155,6 @@ triggers.post('/on-mod-action', async (c) => {
   const targetId = body.targetPost?.id || body.targetComment?.id;
   if (mapped && targetId) {
     try {
-      // We won't have a correlation_id from a Reddit-native action; key by
-      // target instead so the engine can join them at aggregation time.
       const { redis } = await import('@devvit/web/server');
       await redis.hSet(`feedback:reddit-native:${targetId}`, {
         target_id: targetId,
@@ -167,9 +165,24 @@ triggers.post('/on-mod-action', async (c) => {
         at: new Date().toISOString(),
       });
       await redis.expire(`feedback:reddit-native:${targetId}`, 60 * 60 * 24 * 7);
+
+      // I-3.8: record the resolution so the next "Investigate" modal renders
+      // the collapsed "✓ Removed by u/X N min ago" header. Looks up the
+      // active investigation's correlation_id (if any) to keep audit joins clean.
+      const correlationId = (await redis.get(`pending_investigation:${targetId}`)) ?? '';
+      const { recordResolution } = await import('../services/dedup');
+      await recordResolution(targetId, {
+        correlationId,
+        modAction: mapped,
+        moderatorName: body.moderator?.name ?? 'unknown',
+        rawAction: body.action ?? '',
+        source: 'reddit_native',
+      });
+
       console.log('modpilot.feedback.reddit_native', {
         target_id: targetId,
         mod_action: mapped,
+        correlation_id: correlationId,
       });
     } catch (err) {
       console.error('modpilot.feedback.reddit_native.failed', err);

@@ -300,10 +300,18 @@ Goal: Five tools, memory, cold-start, personalities, honest uncertainty.
   - **Verdict cache extended:** `verdict:{correlation_id}` Redis hash now also stores `is_low_conf` so the future custom-post path renders the same way.
   - **Wire integrity:** `npm run type-check` + `npm run lint` + `npm run build` all clean; `scripts/check-banned-terms.sh` + `scripts/check-no-inline-hex.sh` both pass.
 
-### I-3.8 — Resolved / re-reported card states ☐
+### I-3.8 — Resolved / re-reported card states ✅
 - **Spec:** [09-UX.md §4.6](09-UX.md)
 - **Acceptance:** After `ModAction`, card collapses to "✓ Removed by u/X 2 min ago". Re-reports surface "Re-reported 3 times in 10 min" annotation.
 - **Deps:** S-1.6.
+- **Done 2026-05-14:** Two pieces wired through the existing dedup substrate:
+  - **Re-report counter** — `services/dedup.ts:dedupForTarget` now also atomically `incrBy`s `pending_count:{target_id}` (10-min TTL alongside the dedup lock) and stamps `pending_first_at:{target_id}` on the first report. `DedupResult` extended with `{ reportCount, firstReportedAt }`. New `readReportStats(target_id)` returns null when the window has expired; otherwise `{ reportCount, firstReportedAt }`.
+  - **Resolution state** — `services/dedup.ts:recordResolution(target_id, …)` hSets `resolution:{target_id}` (7d TTL) with `correlation_id`, `mod_action`, `moderator_name`, `raw_action`, `source`, `resolved_at`. Called from two paths: (a) `routes/triggers.ts:on-mod-action` for Reddit-native actions (looks up active investigation's correlation_id from `pending_investigation:{target_id}` to keep audit joins clean); (b) `routes/api.ts:/api/feedback` for verdict-card-button clicks (uses the new `target_id` body field). `client/main.js` now passes `target_id` along with the feedback POST. `readResolution(target_id)` reads the cached state.
+  - **Modal surface** — `routes/menu.ts:showVerdictForm` reads both signals via `Promise.all([readReportStats, readResolution])`. Two new field builders produce optional first-rank fields:
+    - `⚠ Re-reported` — *"N reports in M min"* when `reportCount ≥ 2`, with helpText pointing to the velocity Evidence row.
+    - `✓ Resolved` — *"removed by u/X · 2 min ago"* using a new `relativeAgo()` helper (just now / N min ago / N hr ago / N d ago). When present, the modal title flips to `✓ Resolved · <action> by u/<moderator>` so the case-closed state is the dominant signal even before the moderator reads the body.
+  - **Verdict body preserved on resolved** — the modal still shows the full Evidence + Reasoning under the resolution header (per UX-spec "preserved for audit").
+  - `npm run type-check` + `npm run lint` + `npm run build` + banned-terms + no-inline-hex all clean.
 
 ### I-3.9 — Tier 5: Strategy refinement ☐
 - **Spec:** [04-InvestigationEngine.md §2](04-InvestigationEngine.md)

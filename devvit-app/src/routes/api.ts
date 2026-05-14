@@ -4,6 +4,8 @@
 import { Hono } from 'hono';
 import { context, redis, reddit } from '@devvit/web/server';
 
+import { recordResolution } from '../services/dedup';
+
 export const api = new Hono();
 
 // S-1.6: feedback recording. The Verdict Card UI POSTs here when a mod
@@ -16,6 +18,7 @@ api.post('/feedback', async (c) => {
     mod_action?: 'REMOVE' | 'APPROVE' | 'ESCALATE' | 'LOCK';
     recommendation?: string;
     source?: 'verdict_card' | 'reddit_native';
+    target_id?: string;
   };
 
   if (!body.correlation_id || !body.mod_action) {
@@ -45,6 +48,18 @@ api.post('/feedback', async (c) => {
 
   await redis.hSet(`feedback:${body.correlation_id}`, record);
   await redis.expire(`feedback:${body.correlation_id}`, 60 * 60 * 24 * 7); // 7d retention
+
+  // I-3.8: record resolution by target_id so the next "Investigate" modal
+  // for this target collapses to the "✓ Removed by u/X N min ago" header.
+  if (body.target_id) {
+    await recordResolution(body.target_id, {
+      correlationId: body.correlation_id,
+      modAction: body.mod_action,
+      moderatorName: moderator ?? 'unknown',
+      rawAction: body.mod_action.toLowerCase(),
+      source: body.source ?? 'verdict_card',
+    });
+  }
 
   console.log('modpilot.feedback.recorded', record);
   return c.json({ ok: true, data: record }, 200);

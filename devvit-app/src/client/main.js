@@ -176,6 +176,7 @@ async function onAction(label, verdict) {
         mod_action: label.toUpperCase(),
         recommendation: verdict.recommendation,
         source: 'verdict_card',
+        target_id: verdict.target_id || verdict.target?.id || '',
       }),
     });
     const body = await res.json();
