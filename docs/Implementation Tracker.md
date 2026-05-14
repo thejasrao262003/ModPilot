@@ -246,10 +246,11 @@ Goal: Replace the stub with real investigation logic — two tools, a real Reaso
 
 Goal: Five tools, memory, cold-start, personalities, honest uncertainty.
 
-### I-3.1 — Tool: `user_history` ☐
+### I-3.1 — Tool: `user_history` ✅
 - **Spec:** [04-InvestigationEngine.md §5.3.3](04-InvestigationEngine.md), [05-Memory.md](05-Memory.md)
 - **Acceptance:** Reads `user_memory` Postgres row + Redis cache. Returns risk tier label (never raw score). Updates last_seen.
 - **Deps:** E-2.2, I-3.4.
+- **Impl:** `orchestrator/user_history.py` — reads UserMemory, returns risk_tier + counters + signal strength. Registered in lifespan. 11 unit + 3 DB integration tests.
 - **Reddit-API surface validated 2026-05-13 (Devvit-side, ahead of Python impl):** `devvit-app/src/routes/menu.ts:investigate-post` uses `reddit.getUserById` + `getPostsByUser({ sort: 'new', limit: 10 })` + `getCommentsByUser` to produce the `HistorySnapshot` shape the engine tool will need. Reference payload captured against u/trendy_guy2003 stored in playtest logs. Python `user_history` tool consumes the same shape after Devvit sends it (or, more likely, fetches it server-side from the engine via Reddit OAuth).
 
 ### I-3.2 — Tool: `prior_actions` ✅

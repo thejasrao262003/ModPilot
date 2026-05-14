@@ -20,6 +20,7 @@ from orchestrator.loop import Orchestrator
 from orchestrator.prior_actions import PriorActionsTool
 from orchestrator.report_velocity import ReportVelocityTool
 from orchestrator.tools import ToolRegistry
+from orchestrator.user_history import UserHistoryTool
 from store.connections import close_postgres, close_redis, open_postgres, open_redis
 from store.postgres import (
     append_evidence,
@@ -63,6 +64,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     registry = ToolRegistry()
     registry.register(ReportVelocityTool(app.state.redis))
     registry.register(PriorActionsTool(app.state.pg_sessions))
+    registry.register(UserHistoryTool(app.state.pg_sessions))
     # PolicyMatchTool requires embed + rules_text functions; registered when
     # those are wired (post-MVP). Orchestrator records "skipped" for missing tools.
     app.state.orchestrator = Orchestrator(registry)
