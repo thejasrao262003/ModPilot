@@ -9,12 +9,14 @@ Spec: docs/Specs.md §9, docs/07-DataLayer.md.
 
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import cast, literal, select, update
+from sqlalchemy.dialects.postgresql import JSONB as JSONB_TYPE
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
@@ -29,6 +31,7 @@ from store.types import (
     FinalizeInvestigationInput,
     StartInvestigationInput,
     SubredditProfileRow,
+    ThreadMemoryRow,
     UserMemoryRow,
 )
 
@@ -165,6 +168,92 @@ async def upsert_user_memory(  # noqa: PLR0913 — kwarg-only delta-style API, i
         )
     ).scalar_one()
     return UserMemoryRow.model_validate(row)
+
+
+# === Thread memory =====================================================
+
+
+async def get_thread_memory(
+    session: AsyncSession, *, subreddit_id: str, post_id: str
+) -> ThreadMemoryRow | None:
+    row = (
+        await session.execute(
+            select(m.ThreadMemory).where(
+                m.ThreadMemory.subreddit_id == subreddit_id,
+                m.ThreadMemory.post_id == post_id,
+            )
+        )
+    ).scalar_one_or_none()
+    return ThreadMemoryRow.model_validate(row) if row else None
+
+
+async def upsert_thread_memory(
+    session: AsyncSession,
+    *,
+    subreddit_id: str,
+    post_id: str,
+    mod_action_entry: dict[str, object] | None = None,
+) -> ThreadMemoryRow:
+    """Get-or-create thread memory; optionally append a mod action entry."""
+    base = (
+        pg_insert(m.ThreadMemory)
+        .values(subreddit_id=subreddit_id, post_id=post_id)
+        .on_conflict_do_nothing(index_elements=["subreddit_id", "post_id"])
+    )
+    await session.execute(base)
+
+    if mod_action_entry is not None:
+        # Append to the JSONB array using Postgres jsonb || jsonb.
+        new_entry = cast(
+            literal(json.dumps([mod_action_entry])),
+            JSONB_TYPE,
+        )
+        await session.execute(
+            update(m.ThreadMemory)
+            .where(
+                m.ThreadMemory.subreddit_id == subreddit_id,
+                m.ThreadMemory.post_id == post_id,
+            )
+            .values(
+                mod_actions_taken=m.ThreadMemory.mod_actions_taken + new_entry
+            )
+        )
+
+    row = (
+        await session.execute(
+            select(m.ThreadMemory).where(
+                m.ThreadMemory.subreddit_id == subreddit_id,
+                m.ThreadMemory.post_id == post_id,
+            )
+        )
+    ).scalar_one()
+    return ThreadMemoryRow.model_validate(row)
+
+
+# === Subreddit cold-start counter ======================================
+
+
+async def increment_cold_start_count(
+    session: AsyncSession, *, subreddit_id: str
+) -> int:
+    """Increment the feedback counter used for cold-start detection.
+
+    Returns the new count. Spec: docs/05-Memory.md - cold_start transitions
+    at 50 feedback events.
+    """
+    await session.execute(
+        update(m.SubredditProfile)
+        .where(m.SubredditProfile.subreddit_id == subreddit_id)
+        .values(cold_start_count=m.SubredditProfile.cold_start_count + 1)
+    )
+    row = (
+        await session.execute(
+            select(m.SubredditProfile.cold_start_count).where(
+                m.SubredditProfile.subreddit_id == subreddit_id
+            )
+        )
+    ).scalar_one()
+    return int(row)
 
 
 # === Investigation =====================================================

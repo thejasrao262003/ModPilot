@@ -46,6 +46,17 @@ class UserMemoryRow(BaseModel):
     detail: dict[str, object] = Field(default_factory=dict)
 
 
+class ThreadMemoryRow(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="ignore")
+    subreddit_id: str
+    post_id: str
+    mod_actions_taken: list[dict[str, object]] = Field(default_factory=list)
+    participants_count: int = 0
+    last_summary: str = ""
+    last_summary_at: datetime | None = None
+    detail: dict[str, object] = Field(default_factory=dict)
+
+
 class StartInvestigationInput(BaseModel):
     """What `start_investigation` needs to create a pending row."""
 

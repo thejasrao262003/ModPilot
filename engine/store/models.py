@@ -131,6 +131,49 @@ class UserMemory(Base):
     )
 
 
+class ThreadMemory(Base):
+    """Per-(subreddit, post) thread memory. Tracks mod actions and escalation.
+
+    Spec: docs/05-Memory.md §4.
+    """
+
+    __tablename__ = "thread_memory"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    subreddit_id: Mapped[str] = mapped_column(
+        String(20),
+        ForeignKey("subreddit_profile.subreddit_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    post_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    mod_actions_taken: Mapped[list[object]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    participants_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    last_summary_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    detail: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("subreddit_id", "post_id", name="uq_thread_memory_sub_post"),
+        Index("ix_thread_memory_subreddit", "subreddit_id"),
+        Index("ix_thread_memory_post", "post_id"),
+    )
+
+
 class Investigation(Base):
     """One row per Engine /investigate call. The audit-trail backbone."""
 

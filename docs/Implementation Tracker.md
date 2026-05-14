@@ -262,10 +262,11 @@ Goal: Five tools, memory, cold-start, personalities, honest uncertainty.
 - **Acceptance:** For threads ≥10 comments, calls Gemini 2.5 Flash with summarizer prompt; returns structured arc/escalation/instigator/off-topic blob. Caches in Redis `summary:{thread_id}`.
 - **Deps:** F-0.8.
 
-### I-3.4 — User & thread memory ingest ☐
+### I-3.4 — User & thread memory ingest ✅
 - **Spec:** [05-Memory.md](05-Memory.md)
 - **Acceptance:** On every `ModAction`, `user_memory` and `thread_memory` rows update. Risk tier rules from `05-Memory.md` applied.
 - **Deps:** E-2.1.
+- **Done 2026-05-14:** `engine/memory/ingest.py` — `process_feedback()` updates: (1) durable feedback row, (2) user_memory counters + risk tier recomputation, (3) thread_memory mod_actions_taken (JSONB array append), (4) subreddit cold_start_count increment, (5) audit log. `compute_risk_tier()` pure function: new (no history), watched (>=3 violations), trusted (>=5 approvals + 0 violations), neutral (else). `ThreadMemory` model + Alembic migration. `ThreadMemoryRow` Pydantic type. Postgres functions: `get_thread_memory()`, `upsert_thread_memory()`, `increment_cold_start_count()`. 22 tests (13 pure + 9 DB integration). Total suite: 283 passed.
 
 ### I-3.5 — Cold-start mode ☐
 - **Spec:** [05-Memory.md](05-Memory.md), [Specs.md §12.1](Specs.md), [09-UX.md §12](09-UX.md)
