@@ -108,6 +108,7 @@ Your output must conform to the provided JSON schema. No prose outside it.
 _USER_TEMPLATE = """\
 ## Subreddit Context
 Personality: {personality}
+Personality guidance: {personality_phrasing}
 Region: {region}
 Active rules:
 {rules}
@@ -157,6 +158,7 @@ def build_messages(  # noqa: PLR0913
     *,
     accumulator: EvidenceAccumulator,
     personality: str,
+    personality_phrasing: str = "",
     region: str,
     rules: str,
     target_kind: str,
@@ -175,6 +177,7 @@ def build_messages(  # noqa: PLR0913
 
     user_content = _USER_TEMPLATE.format(
         personality=personality,
+        personality_phrasing=personality_phrasing or "(default)",
         region=region,
         rules=rules if rules.strip() else "(no rules configured)",
         target_kind=target_kind,

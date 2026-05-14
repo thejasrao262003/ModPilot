@@ -270,15 +270,17 @@ Goal: Five tools, memory, cold-start, personalities, honest uncertainty.
 - **Deps:** E-2.1.
 - **Done 2026-05-14:** `engine/memory/ingest.py` — `process_feedback()` updates: (1) durable feedback row, (2) user_memory counters + risk tier recomputation, (3) thread_memory mod_actions_taken (JSONB array append), (4) subreddit cold_start_count increment, (5) audit log. `compute_risk_tier()` pure function: new (no history), watched (>=3 violations), trusted (>=5 approvals + 0 violations), neutral (else). `ThreadMemory` model + Alembic migration. `ThreadMemoryRow` Pydantic type. Postgres functions: `get_thread_memory()`, `upsert_thread_memory()`, `increment_cold_start_count()`. 22 tests (13 pure + 9 DB integration). Total suite: 283 passed.
 
-### I-3.5 — Cold-start mode ☐
+### I-3.5 — Cold-start mode ✅
 - **Spec:** [05-Memory.md](05-Memory.md), [Specs.md §12.1](Specs.md), [09-UX.md §12](09-UX.md)
 - **Acceptance:** New install starts with `cold_start=true`. Counter increments on each `feedback` insert. Crosses 50 → automatic transition; UI badge appears/disappears accordingly.
 - **Deps:** I-3.4.
+- **Impl:** Wired across I-3.4 (counter increment), E-2.11 (threshold check `< 50` in main.py), E-2.6 (strategy selector floors FAST→STANDARD), E-2.8 (calibrator demotes confidence). UI badge is Devvit-side (U-4.x).
 
-### I-3.6 — Personality presets ☐
+### I-3.6 — Personality presets ✅
 - **Spec:** [05-Memory.md](05-Memory.md), [Specs.md §12.2](Specs.md)
 - **Acceptance:** Three presets influence confidence thresholds + Reasoner system prompt addendum. Switching personality reflects in next investigation.
 - **Deps:** E-2.10.
+- **Impl:** `personalities/presets.py` — PersonalityPreset dataclass, STRICT/BALANCED/LENIENT presets with prompt_phrasing, deep thresholds, and confidence thresholds. Pipeline wires phrasing into Reasoner prompt. 12 tests.
 
 ### I-3.7 — Honest uncertainty UX ☐
 - **Spec:** [09-UX.md §6](09-UX.md), [Specs.md §11.4](Specs.md)

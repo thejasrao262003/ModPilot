@@ -36,6 +36,7 @@ from orchestrator.calibrator import (
 )
 from orchestrator.strategy import StrategyInputs, select_strategy
 from orchestrator.tools import EvidenceAccumulator, ToolContext
+from personalities.presets import get_preset
 
 if TYPE_CHECKING:
     from api.schemas import InvestigateRequest
@@ -116,9 +117,11 @@ async def run_investigation(  # noqa: PLR0913
 
     # 3. Reasoner — LLM call
     is_partial = orch_result.early_stopped and orch_result.stop_reason != "converged"
+    preset = get_preset(personality)
     messages = build_messages(
         accumulator=accumulator,
         personality=personality,
+        personality_phrasing=preset.prompt_phrasing,
         region=region,
         rules=rules,
         target_kind=req.target.kind,
