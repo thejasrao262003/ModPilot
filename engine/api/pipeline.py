@@ -75,6 +75,8 @@ async def run_investigation(  # noqa: PLR0913
     velocity_zscore: float,
     rule_match_score: float,
     tier_override: str,
+    # I-3.9: cached thread-escalation flag from thread_memory.
+    thread_escalated: bool = False,
 ) -> PipelineResult:
     """Run the full investigation pipeline.  Pure business logic — no I/O
     beyond what the orchestrator tools and LLM client perform.
@@ -97,6 +99,7 @@ async def run_investigation(  # noqa: PLR0913
         personality=personality,  # type: ignore[arg-type]
         tier_override=tier_override,  # type: ignore[arg-type]
         cold_start=cold_start,
+        thread_escalated=thread_escalated,
     )
     decision = select_strategy(strategy_inputs)
     log.info("pipeline.strategy", tier=decision.tier, rationale=decision.rationale)

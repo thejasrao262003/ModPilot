@@ -15,7 +15,7 @@
 | 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ✅ (all 10 tasks) |
 | 1 — End-to-end stub | Days 3–4 | Trigger → stub Engine → fake Verdict Card | ◐ (S-1.1, S-1.3, S-1.4, S-1.5, S-1.6 ✅) |
 | 2 — Real Engine MVP | Days 5–7 | 2 tools + Reasoner + Calibrator, real verdicts | ◐ (E-2.1, E-2.2, E-2.5, E-2.6, E-2.7 ✅) |
-| 3 — Full investigation | Days 8–10 | All 5 tools + memory + cold-start + personalities | ☐ |
+| 3 — Full investigation | Days 8–10 | All 5 tools + memory + cold-start + personalities | ✅ (all 9 tasks) |
 | 4 — Surfaces & polish | Days 11–12 | Dashboard, wizard, menu actions, error states | ☐ |
 | 5 — Eval & demo | Days 13–14 | Eval harness wired, demo script, submission | ☐ |
 
@@ -313,10 +313,19 @@ Goal: Five tools, memory, cold-start, personalities, honest uncertainty.
   - **Verdict body preserved on resolved** — the modal still shows the full Evidence + Reasoning under the resolution header (per UX-spec "preserved for audit").
   - `npm run type-check` + `npm run lint` + `npm run build` + banned-terms + no-inline-hex all clean.
 
-### I-3.9 — Tier 5: Strategy refinement ☐
+### I-3.9 — Tier 5: Strategy refinement ✅
 - **Spec:** [04-InvestigationEngine.md §2](04-InvestigationEngine.md)
 - **Acceptance:** Strategy Selector uses cached user trust tier + thread escalation flag. Tested against 10 scenarios.
 - **Deps:** I-3.1, I-3.4.
+- **Done 2026-05-14:** The selector now consumes both cached signals end-to-end.
+  - **`StrategyInputs.thread_escalated: bool = False`** added to `orchestrator/strategy.py`. Default keeps existing callers working.
+  - **Threshold math:** when `thread_escalated=True`, both `threshold_reporters` and `threshold_velocity` drop by 1 (same magnitude as `personality=strict`, but stacks). A strict sub on an already-escalating thread now escalates at reporter_count=2 instead of 4.
+  - **Combined signal:** `thread_escalated AND user_risk_tier in ("neutral","watched")` is itself a DEEP trigger even when reporter/velocity are quiet — captures the "context-aware investigation" thesis from Specs §1.2.
+  - **FAST veto:** `thread_escalated=True` disqualifies FAST regardless of other signals (we want the Reasoner on known-escalating threads, no shortcut). Cold-start already had this veto; thread-escalation joins it.
+  - **`user_risk_tier` actually wired** (previously hard-coded to `"new"` in `main.py`). `api/main.py:investigate` now reads `user_memory.risk_tier` via `get_user_memory(session, subreddit_id, user_id)` and `thread_memory.mod_actions_taken / detail.escalation_turn` via `get_thread_memory(session, subreddit_id, post_id)`. Both lookups happen in the same session as the `subreddit_profile` fetch — three DB reads in one trip.
+  - **Pipeline plumbing:** `run_investigation(thread_escalated: bool = False)` passes the flag into `StrategyInputs`. Backwards-compat preserved.
+  - **Tests (7 new, 33 total on strategy.py, 100% branch coverage):** reporter-threshold drop with/without escalation, velocity-threshold drop, strict-personality stack (DEEP at reporter_count=2), user-risk + thread-escalation combined signal across both `neutral` and `watched` tiers, "new" user on escalating thread does NOT auto-DEEP (avoid false-positives on newcomers in contentious threads), FAST veto when otherwise eligible (single report + clear rule match + trusted user → bumped to STANDARD), backwards-compat default.
+  - Also: `api/test_investigate.py` patches extended to `get_user_memory` + `get_thread_memory` (all 5 test scenarios). ruff + mypy --strict + 340 tests (2 LLM skipped) + banned-terms + no-inline-hex all clean.
 
 ---
 

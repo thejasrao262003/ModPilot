@@ -136,6 +136,8 @@ class TestInvestigateEndpoint:
             patch("api.main._persist", new_callable=AsyncMock),
             patch("api.main.with_session", _mock_session),
             patch("api.main.get_subreddit_profile", new_callable=AsyncMock, return_value=None),
+            patch("api.main.get_user_memory", new_callable=AsyncMock, return_value=None),
+            patch("api.main.get_thread_memory", new_callable=AsyncMock, return_value=None),
         ):
             r = client.post("/investigate", json=_valid_request())
         assert r.status_code == 200
@@ -150,6 +152,8 @@ class TestInvestigateEndpoint:
             patch("api.main._persist", new_callable=AsyncMock),
             patch("api.main.with_session", _mock_session),
             patch("api.main.get_subreddit_profile", new_callable=AsyncMock, return_value=None),
+            patch("api.main.get_user_memory", new_callable=AsyncMock, return_value=None),
+            patch("api.main.get_thread_memory", new_callable=AsyncMock, return_value=None),
         ):
             r = client.post("/investigate", json=_valid_request())
         v = InvestigateResponse.model_validate(r.json()).data
@@ -165,6 +169,8 @@ class TestInvestigateEndpoint:
             patch("api.main._persist", new_callable=AsyncMock),
             patch("api.main.with_session", _mock_session),
             patch("api.main.get_subreddit_profile", new_callable=AsyncMock, return_value=None),
+            patch("api.main.get_user_memory", new_callable=AsyncMock, return_value=None),
+            patch("api.main.get_thread_memory", new_callable=AsyncMock, return_value=None),
         ):
             client.post("/investigate", json=_valid_request())
         mock_pipeline.assert_called_once()
@@ -180,6 +186,8 @@ class TestInvestigateEndpoint:
             patch("api.main._persist", mock_persist),
             patch("api.main.with_session", _mock_session),
             patch("api.main.get_subreddit_profile", new_callable=AsyncMock, return_value=None),
+            patch("api.main.get_user_memory", new_callable=AsyncMock, return_value=None),
+            patch("api.main.get_thread_memory", new_callable=AsyncMock, return_value=None),
         ):
             client.post("/investigate", json=_valid_request())
         mock_persist.assert_called_once()
@@ -215,6 +223,8 @@ class TestInvestigateValidation:
             patch("api.main._persist", new_callable=AsyncMock),
             patch("api.main.with_session", _mock_session),
             patch("api.main.get_subreddit_profile", new_callable=AsyncMock, return_value=None),
+            patch("api.main.get_user_memory", new_callable=AsyncMock, return_value=None),
+            patch("api.main.get_thread_memory", new_callable=AsyncMock, return_value=None),
         ):
             payload = _valid_request()
             payload["target"] = {

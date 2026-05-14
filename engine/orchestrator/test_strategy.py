@@ -220,3 +220,83 @@ def test_override_unknown_value_raises() -> None:
 
     with pytest.raises(ValueError, match="unsupported override"):
         _override_tier("nonsense")  # type: ignore[arg-type]
+
+
+# === I-3.9: thread_escalated cached signal ============================
+
+
+def test_thread_escalated_lowers_reporter_threshold() -> None:
+    """On a balanced sub, 3 reporters is below DEEP — *unless* the thread
+    has known prior escalation, which drops the threshold from 4 to 3."""
+    not_escalated = select_strategy(_inputs(reporter_count=3, thread_escalated=False))
+    assert not_escalated.tier == "STANDARD"
+    escalated = select_strategy(_inputs(reporter_count=3, thread_escalated=True))
+    assert escalated.tier == "DEEP"
+    assert "reporter_count" in escalated.rationale
+
+
+def test_thread_escalated_lowers_velocity_threshold() -> None:
+    not_escalated = select_strategy(_inputs(velocity_zscore=2.5, thread_escalated=False))
+    assert not_escalated.tier == "STANDARD"
+    escalated = select_strategy(_inputs(velocity_zscore=2.5, thread_escalated=True))
+    assert escalated.tier == "DEEP"
+    assert "velocity_z" in escalated.rationale
+
+
+def test_thread_escalated_stacks_with_strict_personality() -> None:
+    """strict (-1) + thread_escalated (-1) = reporter threshold 2."""
+    d = select_strategy(
+        _inputs(reporter_count=2, personality="strict", thread_escalated=True)
+    )
+    assert d.tier == "DEEP"
+
+
+def test_thread_escalated_plus_user_risk_triggers_deep_alone() -> None:
+    """Even at quiet baseline (1 reporter, z=0), a watched/neutral user on
+    a known-escalating thread is DEEP. Captures the 'context-aware'
+    investigation thesis from docs/Specs.md §1.2."""
+    for tier in ("neutral", "watched"):
+        d = select_strategy(
+            _inputs(
+                reporter_count=1,
+                velocity_zscore=0.0,
+                user_risk_tier=tier,
+                thread_escalated=True,
+            )
+        )
+        assert d.tier == "DEEP", f"user_risk_tier={tier}"
+        assert "thread_escalated+user_risk" in d.rationale
+
+
+def test_thread_escalated_plus_new_user_does_not_force_deep() -> None:
+    """A new user on an escalating thread isn't automatically DEEP — needs
+    a confirming velocity / reporter signal. Avoids false-positives on
+    newcomers who happened to land in a contentious thread."""
+    d = select_strategy(
+        _inputs(reporter_count=1, velocity_zscore=0.0, user_risk_tier="new", thread_escalated=True)
+    )
+    # No combined signal triggered, default branch wins.
+    assert d.tier == "STANDARD"
+
+
+def test_thread_escalated_vetoes_fast() -> None:
+    """A target that would otherwise hit FAST (single report, clear rule
+    match, trusted user) is bumped to STANDARD when the thread is known
+    to be escalating — we want the Reasoner's review, not a shortcut."""
+    base_inputs: dict[str, object] = {
+        "reporter_count": 1,
+        "velocity_zscore": 0.0,
+        "rule_match_score": 0.95,
+        "user_risk_tier": "trusted",
+    }
+    fast = select_strategy(_inputs(**base_inputs, thread_escalated=False))
+    assert fast.tier == "FAST"
+    no_fast = select_strategy(_inputs(**base_inputs, thread_escalated=True))
+    assert no_fast.tier == "STANDARD"
+
+
+def test_thread_escalated_default_is_false() -> None:
+    """Backwards-compat: existing callers that don't set thread_escalated
+    keep working as before."""
+    d = select_strategy(_inputs())
+    assert d.tier == "STANDARD"  # same default behaviour

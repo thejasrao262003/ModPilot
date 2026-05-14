@@ -39,6 +39,11 @@ class StrategyInputs:
     personality: Personality = "balanced"
     tier_override: TierOverride = "auto"
     cold_start: bool = False
+    # I-3.9: cached signal — true when prior mod attention or a prior
+    # thread_context summary recorded escalation on this thread. The
+    # selector treats this as an additional escalation signal that
+    # lowers DEEP thresholds by 1 (stacks with personality=strict).
+    thread_escalated: bool = False
 
 
 @dataclass(frozen=True)
@@ -127,6 +132,13 @@ def _deep_signals(inputs: StrategyInputs) -> list[str]:
         threshold_reporters += 1
         threshold_velocity += 1.0
 
+    # I-3.9: cached thread escalation lowers the same thresholds by another
+    # step. Stacks with personality=strict; a strict sub on an already-
+    # escalating thread escalates at reporter_count=2 instead of 4.
+    if inputs.thread_escalated:
+        threshold_reporters -= 1
+        threshold_velocity -= 1.0
+
     signals: list[str] = []
     if inputs.reporter_count >= threshold_reporters:
         signals.append(f"reporter_count={inputs.reporter_count}>={threshold_reporters}")
@@ -134,11 +146,18 @@ def _deep_signals(inputs: StrategyInputs) -> list[str]:
         signals.append(f"velocity_z={inputs.velocity_zscore:.1f}>={threshold_velocity:.1f}")
     if inputs.user_risk_tier == "watched":
         signals.append("user_risk_tier=watched")
+    # A user-trust + thread-escalation combo is itself a DEEP trigger even
+    # if neither reporter_count nor velocity is at threshold yet.
+    if inputs.thread_escalated and inputs.user_risk_tier in ("neutral", "watched"):
+        signals.append("thread_escalated+user_risk")
     return signals
 
 
 def _fast_eligible(inputs: StrategyInputs) -> bool:
     if inputs.cold_start:
+        return False
+    # I-3.9: never short-circuit a known-escalating thread with FAST.
+    if inputs.thread_escalated:
         return False
     return (
         inputs.reporter_count == 1

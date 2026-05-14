@@ -27,6 +27,8 @@ from store.postgres import (
     append_evidence,
     finalize_investigation,
     get_subreddit_profile,
+    get_thread_memory,
+    get_user_memory,
     make_sessionmaker,
     start_investigation,
     with_session,
@@ -145,14 +147,17 @@ async def investigate(
     orchestrator: Orchestrator = request.app.state.orchestrator
     llm = request.app.state.llm
 
-    # Fetch subreddit context from DB (cold-start defaults if missing).
+    # Fetch subreddit + memory context from DB (cold-start defaults if missing).
     personality = "balanced"
     region = "Global"
     rules = ""
     cold_start = True
     user_risk_tier = "new"
     tier_override = "auto"
+    thread_escalated = False
 
+    # I-3.9: pull subreddit_profile + user_memory + thread_memory in a
+    # single session so the Strategy Selector inputs reflect cached state.
     async with with_session(request.app.state.pg_sessions) as session:
         profile = await get_subreddit_profile(
             session, subreddit_id=req.subreddit_id
@@ -163,6 +168,25 @@ async def investigate(
             rules = profile.rules
             cold_start = profile.cold_start_count < 50
             tier_override = profile.tier_override
+
+        if req.target.author:
+            user_mem = await get_user_memory(
+                session, subreddit_id=req.subreddit_id, user_id=req.target.author
+            )
+            if user_mem is not None:
+                user_risk_tier = user_mem.risk_tier
+
+        if req.context.thread_id:
+            thread_mem = await get_thread_memory(
+                session, subreddit_id=req.subreddit_id, post_id=req.context.thread_id
+            )
+            if thread_mem is not None:
+                # Escalation cached when prior mod attention exists OR a
+                # prior thread_context summary recorded escalation.
+                escalation_turn = thread_mem.detail.get("escalation_turn")
+                thread_escalated = bool(thread_mem.mod_actions_taken) or (
+                    escalation_turn is not None
+                )
 
     # Run the pipeline.
     result = await run_investigation(
@@ -177,6 +201,7 @@ async def investigate(
         velocity_zscore=0.0,  # TODO(E-3.x): precompute from Redis before pipeline
         rule_match_score=0.0,  # TODO(E-3.x): precompute from embeddings before pipeline
         tier_override=tier_override,
+        thread_escalated=thread_escalated,
     )
 
     # Persist investigation + evidence rows.
