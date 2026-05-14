@@ -11,6 +11,8 @@ import type { MenuItemRequest, UiResponse } from '@devvit/web/shared';
 import { reddit, redis } from '@devvit/web/server';
 
 import { readReportStats, readResolution, relativeAgo } from '../services/dedup';
+import { callInvestigate } from '../services/engineClient';
+import type { InvestigateRequest } from '../services/engineClient';
 import { uncertainty } from '../ui/copy';
 
 export const menu = new Hono();
@@ -67,6 +69,58 @@ function selectCanned(targetId: string): CannedVerdict {
   let h = 0;
   for (let i = 0; i < targetId.length; i++) h = (h + targetId.charCodeAt(i)) | 0;
   return Math.abs(h) % 5 < 2 ? CANNED_LOW : CANNED_HIGH;
+}
+
+/** S-1.2: call the real engine, project the Verdict to the canned shape for the form. */
+async function fetchEngineVerdict(args: {
+  correlationId: string;
+  subredditId: string;
+  inputs: VerdictFormInputs;
+}): Promise<CannedVerdict | null> {
+  const req: InvestigateRequest = {
+    correlation_id: args.correlationId,
+    subreddit_id: args.subredditId || 't5_unknown',
+    target: {
+      kind: args.inputs.kind,
+      id: args.inputs.targetId,
+      body: args.inputs.title,
+      author: args.inputs.author,
+    },
+    report: {
+      reasons: [],
+      reporter_count: args.inputs.reportCount,
+    },
+    context: {},
+  };
+  const result = await callInvestigate(req);
+  if (!result.ok) {
+    console.warn('modpilot.menu.engine.unavailable', {
+      correlation_id: args.correlationId,
+      code: result.code,
+      message: result.message,
+      latency_ms: result.latency_ms,
+    });
+    return null;
+  }
+  const v = result.verdict;
+  console.log('modpilot.menu.engine.verdict', {
+    correlation_id: v.correlation_id,
+    tier: v.tier,
+    recommendation: v.recommendation,
+    confidence_pct: Math.round(v.calibrated_confidence * 100),
+    cost_usd: v.cost_usd,
+    latency_ms: result.latency_ms,
+  });
+  return {
+    tier: v.tier,
+    risk_tier: v.risk_tier,
+    recommendation: v.recommendation,
+    calibrated_confidence: v.calibrated_confidence,
+    rationale: v.rationale,
+    top_evidence: v.top_evidence
+      .slice(0, 3)
+      .map((row) => ({ id: row.id, summary: row.summary })),
+  };
 }
 
 // U-4.4: "Investigate with ModPilot" — runs an investigation against the
@@ -160,7 +214,17 @@ async function showVerdictForm(c: Context, inputs: VerdictFormInputs): Promise<R
   const correlationId =
     cached?.correlation_id ?? `inv-${Date.now()}-${inputs.targetId.slice(3, 10)}`;
 
-  const verdict = selectCanned(inputs.targetId);
+  // S-1.2: try the real engine first; fall back to a canned verdict only
+  // if the engine is unreachable. Per Specs §13.1 graceful degradation —
+  // the moderator always sees *something*, never an error.
+  const engineResult = await fetchEngineVerdict({
+    correlationId,
+    subredditId: cached?.subreddit_id ?? '',
+    inputs,
+  });
+  const verdict = engineResult ?? selectCanned(inputs.targetId);
+  const verdictSource: 'engine' | 'canned' = engineResult ? 'engine' : 'canned';
+
   const pct = Math.round(verdict.calibrated_confidence * 100);
   const isLowConf = verdict.calibrated_confidence < LOW_CONF_THRESHOLD;
 
@@ -280,7 +344,10 @@ async function showVerdictForm(c: Context, inputs: VerdictFormInputs): Promise<R
               type: 'paragraph',
               defaultValue: verdict.rationale,
               disabled: true,
-              helpText: `Correlation id: ${correlationId} · model: gemini-2.5-pro · cost $0.018`,
+              helpText:
+                verdictSource === 'engine'
+                  ? `Correlation id: ${correlationId} · live engine verdict · model: gemini-2.5-pro`
+                  : `Correlation id: ${correlationId} · canned (engine unreachable) · gemini-2.5-pro`,
             },
           ],
         },

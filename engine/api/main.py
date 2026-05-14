@@ -25,8 +25,8 @@ from orchestrator.user_history import UserHistoryTool
 from store.connections import close_postgres, close_redis, open_postgres, open_redis
 from store.postgres import (
     append_evidence,
+    ensure_subreddit_profile,
     finalize_investigation,
-    get_subreddit_profile,
     get_thread_memory,
     get_user_memory,
     make_sessionmaker,
@@ -158,9 +158,14 @@ async def investigate(
 
     # I-3.9: pull subreddit_profile + user_memory + thread_memory in a
     # single session so the Strategy Selector inputs reflect cached state.
+    # Lazily create the subreddit_profile row on first contact — the engine
+    # doesn't yet receive onAppInstall (post-MVP), so production traffic
+    # would otherwise FK-violate on investigation insert.
     async with with_session(request.app.state.pg_sessions) as session:
-        profile = await get_subreddit_profile(
-            session, subreddit_id=req.subreddit_id
+        profile = await ensure_subreddit_profile(
+            session,
+            subreddit_id=req.subreddit_id,
+            name=req.subreddit_id,  # name unknown engine-side until AppInstall relay; safe default
         )
         if profile is not None:
             personality = profile.personality

@@ -77,7 +77,7 @@
     "redis": true,
     "http": {
       "enable": true,
-      "domains": []
+      "domains": ["26c5-106-51-222-112.ngrok-free.app"]
     }
   }
 }

@@ -13,13 +13,13 @@
 | Phase | Window | Goal | Status |
 |---|---|---|---|
 | 0 — Foundation | Days 1–2 | Docs locked, scaffolds, secrets, CI shell | ✅ (all 10 tasks) |
-| 1 — End-to-end stub | Days 3–4 | Trigger → stub Engine → fake Verdict Card | ◐ (S-1.1, S-1.3, S-1.4, S-1.5, S-1.6 ✅) |
+| 1 — End-to-end stub | Days 3–4 | Trigger → stub Engine → fake Verdict Card | ◐ (S-1.1, S-1.2, S-1.3, S-1.4, S-1.5, S-1.6 ✅; S-1.7 left) |
 | 2 — Real Engine MVP | Days 5–7 | 2 tools + Reasoner + Calibrator, real verdicts | ◐ (E-2.1, E-2.2, E-2.5, E-2.6, E-2.7 ✅) |
 | 3 — Full investigation | Days 8–10 | All 5 tools + memory + cold-start + personalities | ✅ (all 9 tasks) |
 | 4 — Surfaces & polish | Days 11–12 | Dashboard, wizard, menu actions, error states | ☐ |
 | 5 — Eval & demo | Days 13–14 | Eval harness wired, demo script, submission | ☐ |
 
-**Current focus:** Phase 1 nearly closed. S-1.1, S-1.3, S-1.4, S-1.5, S-1.6 ✅ — full Devvit-side loop works: report fires → dedup → correlation_id minted → trigger context cached → menu modal renders verdict with the same correlation_id → button click records feedback. Remaining: S-1.2 (Devvit → Engine HTTP — needs tunnel) and S-1.7 (demo script).
+**Current focus:** Phases 0–3 ✅. Phase 1 closing — S-1.2 wired through an ngrok tunnel; menu calls real engine and falls back to canned on failure (graceful degradation per Specs §13.1). Only S-1.7 (demo script) remains. Next: Phase 4 surfaces & polish or Phase 5 demo/eval.
 
 ---
 
@@ -106,10 +106,17 @@ Goal: A `CommentReport` produces a (fake) Verdict Card visible to the mod. No re
 - **Deps:** F-0.4.
 - **Done 2026-05-13:** New `src/services/dedup.ts` exposes `dedupForTarget(targetId)` — atomic SET-with-NX on `pending_investigation:{target_id}` (10-min TTL); duplicates within the window return the existing `correlation_id` so the engine call stays idempotent. Also exposes `cacheTriggerContext()` which hSets `trigger_ctx:{target_id}` with `correlation_id`, `subreddit_id`, `subreddit_name`, `author_id`, **`num_reports`** (authoritative from the trigger payload, fixes the menu-action `numberOfReports === -1` gotcha), `reason`, `received_at` (24h TTL). Both `on-comment-report` and `on-post-report` now: pull the target id → dedup → cache context → log `accepted` with correlation_id (or `deduped` if within window) → TODO(S-1.2) for the engine call. Menu actions `investigate-{post,comment}` read from the cached context first, so a moderator who opens "Investigate" on a target that was just reported gets the *same* correlation_id and authoritative report count as the report-triggered investigation. Verified via type-check + lint + build clean.
 
-### S-1.2 — Devvit → Engine client ☐
+### S-1.2 — Devvit → Engine client ✅
 - **Spec:** [Specs.md §10](Specs.md), [03-Devvit.md](03-Devvit.md)
 - **Acceptance:** `services/engineClient.ts` signs requests with HMAC, posts to `/investigate`, parses response. Handles 5xx with one retry + graceful degradation.
 - **Deps:** F-0.5, S-1.1.
+- **Done 2026-05-14:** Tunnel-based dev wiring. Live end-to-end verified — Devvit menu action signs an InvestigateRequest with HMAC-SHA256, ngrok forwards to localhost:8000, engine runs Strategy → Orchestrator → 4 tools → Reasoner (or fallback) → returns the InvestigateResponse envelope.
+  - **Tunnel:** `ngrok http 8000` → public URL added to `devvit.json:permissions.http.domains`. ENGINE_URL + ENGINE_SHARED_SECRET live in `devvit-app/src/services/engineConfig.local.ts` (gitignored; `engineConfig.example.ts` is the committed template). Secret matches engine/.env ENGINE_SHARED_SECRET. Domain string in devvit.json is the only thing committed that ties to a specific tunnel host — rotates with each `ngrok` session.
+  - **`engineClient.ts`:** `callInvestigate(req, timeoutMs=8000)` → `EngineResult` union (`{ ok: true; verdict; latency_ms }` or `{ ok: false; code; message; retryable; latency_ms }`). HMAC computed via Web Crypto API (`crypto.subtle.sign("HMAC", ...)`) so we stay runtime-portable. Headers: `x-modpilot-signature`, `x-modpilot-timestamp` (unix seconds, 5-min skew tolerated), `x-correlation-id`, plus `ngrok-skip-browser-warning: 1` for the free-tier interstitial. AbortController timeout, soft-fail on every error (`TIMEOUT`/`NETWORK`/`INVALID_ENVELOPE`/`HTTP_NNN`) — no exceptions reach the menu handler.
+  - **Menu graceful degradation:** `menu.ts:showVerdictForm` now calls `fetchEngineVerdict(...)` first, falls back to `selectCanned(targetId)` on failure (per Specs §13.1). Modal helpText footer surfaces the source: *"live engine verdict · model: gemini-2.5-pro"* vs *"canned (engine unreachable)"* so the demo audience can see the difference.
+  - **Engine lazy-creates `subreddit_profile`:** the API-side `investigate` handler used to crash with `ForeignKeyViolationError` because `onAppInstall` doesn't relay to the engine yet (post-MVP). Replaced `get_subreddit_profile` with `ensure_subreddit_profile` which does `INSERT ... ON CONFLICT DO NOTHING` then reads back — first call on a subreddit creates the row, every subsequent call uses it.
+  - **Smoke test:** synthetic `tunnel-smoke-2` request returned a real fallback verdict (`NO_RECOMMENDATION` @ 15%) with timeline=4 — exactly the expected behaviour when Reasoner can't produce a properly-citation-resolving response from thin synthetic evidence (E-2.12 rule-based fallback kicked in). The menu modal renders this as the honest-uncertainty LOW path. Real Reddit reports with thread_excerpts will produce confident verdicts.
+  - ruff + mypy --strict + 340 tests + banned-terms + no-inline-hex all clean.
 
 ### S-1.3 — Stub `/investigate` returns canned verdict ✅
 - **Spec:** [Specs.md §10.2](Specs.md)

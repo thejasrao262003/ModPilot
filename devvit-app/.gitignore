@@ -2,3 +2,7 @@ node_modules
 .DS_Store
 dist
 .env
+
+# Per-dev tunnel + secret values. Use src/services/engineConfig.example.ts
+# as the template; copy to engineConfig.local.ts and fill in.
+src/services/engineConfig.local.ts
