@@ -24,6 +24,18 @@ export type CalibrationInputs = {
   validationPassed: boolean;
   coldStart: boolean;
   isPartial: boolean;
+  // Recommendation context: rule_match means different things for REMOVE
+  // (supports removal) vs APPROVE (the rule's keywords matched but the
+  // content doesn't actually violate it — so a *weak* match means the rule
+  // clearly doesn't apply, which strengthens the APPROVE call). Cold-start
+  // demotion also makes less sense for APPROVE — approving correctly has
+  // no destructive cost. Provide this so the calibrator can adapt.
+  recommendation?:
+    | 'REMOVE'
+    | 'APPROVE'
+    | 'ESCALATE'
+    | 'LOCK'
+    | 'NO_RECOMMENDATION';
 };
 
 export type CalibrationResult = {
@@ -37,15 +49,35 @@ export type CalibrationResult = {
 
 export function calibrate(inp: CalibrationInputs): CalibrationResult {
   const llmSignal = 0.5 + (inp.llmSelfReport - 0.5) * LLM_DISCOUNT_FACTOR;
+
+  // Effective rule-match contribution.
+  // For removal-leaning recommendations (REMOVE / LOCK), high rule_match
+  // *supports* the recommendation → use raw value.
+  // For APPROVE / NO_RECOMMENDATION / ESCALATE, the rule's keywords matched
+  // but the Reasoner judged no violation. A *weak* match strongly supports
+  // the approve call ("rule doesn't apply at all"). Invert.
+  const isRemoveCall =
+    inp.recommendation === 'REMOVE' || inp.recommendation === 'LOCK';
+  const effectiveRuleMatch = isRemoveCall
+    ? inp.ruleMatchStrength
+    : 1 - inp.ruleMatchStrength;
+
   let base =
     W_LLM * llmSignal +
     W_EVIDENCE * inp.evidenceConvergence +
     W_ACCURACY * inp.subredditAccuracy +
-    W_RULE_MATCH * inp.ruleMatchStrength;
+    W_RULE_MATCH * effectiveRuleMatch;
 
   if (!inp.validationPassed) base *= DEMOTION_VALIDATION_FAILED;
   if (inp.isPartial) base *= DEMOTION_PARTIAL;
-  if (inp.coldStart) base *= DEMOTION_COLD_START;
+  // Skip cold-start demotion for APPROVE — approving correctly has no
+  // destructive cost, so being conservative about confidence on approvals
+  // is actively harmful (low conf → mod might second-guess a clearly
+  // benign post). Honest-uncertainty rule still kicks in via the LOW tier
+  // boundary; we just don't deflate the number 15% on top of that.
+  if (inp.coldStart && inp.recommendation !== 'APPROVE') {
+    base *= DEMOTION_COLD_START;
+  }
 
   base = Math.max(0.0, Math.min(1.0, base));
   return {

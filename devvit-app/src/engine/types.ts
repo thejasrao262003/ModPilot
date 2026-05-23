@@ -129,6 +129,10 @@ export type Verdict = {
     sampleSize: number;
     aligned: number;
   };
+  // Stage 1 content-judgment findings — short checkmark-style bullets the
+  // Reasoner produces about the content itself. Shown in the moderator's
+  // "Current Content Assessment" panel. NEVER includes author metadata.
+  contentFindings: string[];
 };
 
 export interface Tool {

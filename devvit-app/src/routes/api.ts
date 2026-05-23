@@ -8,8 +8,9 @@ import { context, redis, reddit } from '@devvit/web/server';
 import { recordResolution } from '../services/dedup';
 import { ensureSubredditProfile } from '../engine/store/subreddit';
 import { GeminiClient } from '../engine/llm/gemini';
+import { resolveGeminiKey } from '../engine/llm/keyResolver';
 import { ResponseDrafter, type DraftInputs } from '../engine/llm/responseDrafter';
-import { GEMINI_API_KEY } from '../config/geminiConfig.local';
+import { readRecentActions, readStats } from '../engine/store/stats';
 
 export const api = new Hono();
 
@@ -97,6 +98,35 @@ api.post('/feedback', async (c) => {
     try {
       await applyModerationAction({ targetId, targetKind, action: body.mod_action });
       actionApplied = true;
+
+      // Bump user_memory inline so the *next* investigation on the same
+      // author sees the updated counts immediately. The onModAction trigger
+      // also bumps, but fires async — there was a race where the next
+      // investigation read user_memory before the trigger landed.
+      // To avoid double-counting, onModAction now dedupes on `resolution:`.
+      if (context.subredditId) {
+        try {
+          const stored = await redis.hGetAll(`verdict:${body.correlation_id}`).catch(() => null);
+          const authorId = stored?.target_author_id ?? stored?.target_author ?? '';
+          if (authorId && authorId.startsWith('t2_')) {
+            const { bumpViolation, bumpApproval } = await import('../engine/store/userMemory');
+            if (body.mod_action === 'REMOVE') {
+              await bumpViolation(context.subredditId, authorId);
+            } else if (body.mod_action === 'APPROVE') {
+              await bumpApproval(context.subredditId, authorId);
+            }
+            console.log('modpilot.feedback.user_memory_bumped', {
+              correlation_id: body.correlation_id,
+              author_id: authorId,
+              action: body.mod_action,
+            });
+          }
+        } catch (memErr) {
+          console.warn('modpilot.feedback.memory_bump_failed', {
+            err: memErr instanceof Error ? memErr.message : String(memErr),
+          });
+        }
+      }
     } catch (err) {
       actionError = err instanceof Error ? err.message : String(err);
       console.warn('modpilot.action.failed', {
@@ -133,14 +163,19 @@ api.post('/feedback', async (c) => {
     });
   }
 
-  // Bump alignment counter (best-effort) — feeds the Stats menu.
+  // Bump alignment counter + record in the recent-actions index. Both
+  // best-effort; feed the Stats dashboard.
   if (context.subredditId && body.recommendation) {
     try {
-      const { bumpAlignmentStats } = await import('../engine/store/stats');
+      const { bumpAlignmentStats, recordRecentAction } = await import('../engine/store/stats');
       await bumpAlignmentStats({
         subId: context.subredditId,
         recommendation: body.recommendation.toUpperCase() as ModAction,
         modAction: body.mod_action,
+      });
+      await recordRecentAction({
+        subId: context.subredditId,
+        correlationId: body.correlation_id,
       });
     } catch (err) {
       console.warn('modpilot.feedback.stats_bump_failed', {
@@ -231,6 +266,34 @@ async function safeCurrentUsername(): Promise<string | undefined> {
 // The `c` query param is the correlation_id; if absent we try context.postId
 // → its stored postData → correlation_id.
 api.get('/verdict', async (c) => {
+  // Dispatch on post_kind: stats posts return stats payload; verdict posts
+  // return the regular verdict.
+  const postId = context.postId;
+  if (postId) {
+    const kind = await redis.get(`post_kind:${postId}`).catch(() => null);
+    if (kind === 'stats') {
+      const subId =
+        (await redis.get(`post_stats_sub:${postId}`).catch(() => null)) ?? context.subredditId ?? '';
+      if (!subId) {
+        return c.json(
+          { ok: false, error: { code: 'NO_SUB', message: 'Missing subreddit for stats post.' } },
+          404,
+        );
+      }
+      const [stats, recent] = await Promise.all([
+        readStats(subId),
+        readRecentActions(subId, 10).catch(() => []),
+      ]);
+      return c.json(
+        {
+          ok: true,
+          data: { kind: 'stats', sub_id: subId, ...stats, recent_actions: recent },
+        },
+        200,
+      );
+    }
+  }
+
   let correlationId = c.req.query('c');
 
   if (!correlationId) {
@@ -244,11 +307,33 @@ api.get('/verdict', async (c) => {
     const row = await redis.hGetAll(`verdict:${correlationId}`);
     if (row?.correlation_id) {
       verdict = projectStoredVerdict(row);
+      // Fetch resolution alongside — drives the "CASE RESOLVED" banner.
+      let resolution: Record<string, string> | null = null;
+      if (row.target_id) {
+        const resolutionRow = await redis
+          .hGetAll(`resolution:${row.target_id}`)
+          .catch(() => null);
+        if (resolutionRow && Object.keys(resolutionRow).length > 0) {
+          resolution = resolutionRow;
+        }
+      }
+      // Resolve subreddit display name — the verdict was created in this sub,
+      // so we just ask the current context. This drives the masthead
+      // "r/<subreddit> — standard investigation" line instead of "r/unknown".
+      let subredditName: string | undefined;
+      try {
+        const currentSub = await reddit.getCurrentSubreddit();
+        subredditName = currentSub?.name;
+      } catch {
+        // ignore — UI falls back gracefully
+      }
       target = {
         id: row.target_id,
         kind: row.target_kind,
         title: row.target_title,
         author: row.target_author,
+        subreddit: subredditName,
+        resolution,
       };
     }
   } catch (err) {
@@ -346,6 +431,7 @@ function projectStoredVerdict(row: Record<string, string>): Record<string, unkno
     key_factors: parseJsonArray(row.key_factors_json),
     rule_matches: parseJsonArray(row.rule_matches_json),
     alignment: parseJsonObject(row.alignment_json),
+    content_findings: parseJsonArray(row.content_findings_json),
   };
 }
 
@@ -476,7 +562,25 @@ api.post('/draft-response', async (c) => {
   };
 
   try {
-    const llm = new GeminiClient(GEMINI_API_KEY);
+    const resolved = await resolveGeminiKey(subredditId);
+    if (resolved.source === 'missing' || !resolved.key) {
+      return c.json(
+        {
+          ok: false,
+          error: {
+            code: 'NO_KEY',
+            message:
+              'No Gemini API key configured. Open ModPilot: Configure policy to set one.',
+          },
+        },
+        400,
+      );
+    }
+    console.log('modpilot.draft.key_source', {
+      correlation_id: body.correlation_id,
+      source: resolved.source,
+    });
+    const llm = new GeminiClient(resolved.key);
     const drafter = new ResponseDrafter(llm);
     const draft = await drafter.draft(draftInputs, body.correlation_id);
     return c.json({ ok: true, data: draft }, 200);

@@ -1,12 +1,20 @@
-// "ModPilot: Stats" — subreddit-level dashboard. Reads counters maintained
-// by pipeline.ts (per-investigation) and /api/feedback (per-mod-action) and
-// renders them in a read-only form.
+// "ModPilot: Stats" — opens a custom-post webview (polished UI).
+//
+// Per official Devvit docs (capabilities/client/forms.mdx), showForm has no
+// CSS / theme / HTML escape hatch. The only path to a real-looking dashboard
+// is a custom post with our own webview.
+//
+// Flow:
+//   1. submitCustomPost with postData.kind = 'stats'
+//   2. Auto-remove → lands in mod queue, not public feed (same as verdict posts)
+//   3. Write post_kind:{post_id} = 'stats' + post_stats_sub:{post_id} = subId
+//   4. navigateTo the post
+//
+// The webview's /api/verdict request dispatches based on post_kind.
 
 import { Hono } from 'hono';
 import type { UiResponse } from '@devvit/web/shared';
-import { context } from '@devvit/web/server';
-
-import { readStats } from '../engine/store/stats';
+import { context, redis, reddit } from '@devvit/web/server';
 
 export const menuStats = new Hono();
 
@@ -19,89 +27,55 @@ menuStats.post('/open', async (c) => {
     );
   }
 
-  const s = await readStats(subId);
+  try {
+    const subreddit = await reddit.getCurrentSubreddit();
+    if (!subreddit?.name) {
+      return c.json<UiResponse>(
+        { showToast: { text: 'Could not resolve subreddit name.' } },
+        200,
+      );
+    }
 
-  if (s.investigationsTotal === 0) {
-    return c.json<UiResponse>(
-      {
-        showForm: {
-          name: 'wipeMemory',
-          form: {
-            title: '📊 ModPilot stats',
-            acceptLabel: 'Close',
-            cancelLabel: 'Close',
-            fields: [
-              {
-                name: 'empty',
-                label: 'Status',
-                type: 'string',
-                defaultValue: 'No investigations yet. Try "Investigate with ModPilot" on a post.',
-                disabled: true,
-              },
-            ],
-          },
-        },
+    const post = await reddit.submitCustomPost({
+      subredditName: subreddit.name,
+      title: `📊 ModPilot Stats · r/${subreddit.name}`,
+      postData: { kind: 'stats', sub_id: subId },
+      textFallback: {
+        text: `ModPilot stats dashboard for r/${subreddit.name}.`,
       },
+    });
+
+    try {
+      await post.remove();
+    } catch (err) {
+      console.warn('modpilot.stats.auto_remove_failed', {
+        post_id: post.id,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    await redis.set(`post_kind:${post.id}`, 'stats', {
+      expiration: new Date(Date.now() + 60 * 60 * 24 * 7 * 1000),
+    });
+    await redis.set(`post_stats_sub:${post.id}`, subId, {
+      expiration: new Date(Date.now() + 60 * 60 * 24 * 7 * 1000),
+    });
+
+    console.log('modpilot.stats.custom_post.created', {
+      post_id: post.id,
+      sub_id: subId,
+      permalink: post.permalink,
+    });
+
+    return c.json<UiResponse>(
+      { navigateTo: `https://reddit.com${post.permalink}` },
+      200,
+    );
+  } catch (err) {
+    console.error('modpilot.stats.open_failed', err instanceof Error ? err.stack : err);
+    return c.json<UiResponse>(
+      { showToast: { text: `Failed to open stats: ${String(err)}` } },
       200,
     );
   }
-
-  const fields = [
-    field('investigations_total', 'Investigations', String(s.investigationsTotal)),
-    field(
-      'avg_confidence',
-      'Average calibrated confidence',
-      `${(s.avgConfidence * 100).toFixed(1)}%`,
-    ),
-    field(
-      'avg_latency',
-      'Average latency',
-      `${(s.avgLatencyMs / 1000).toFixed(2)}s`,
-    ),
-    field('total_cost', 'Total LLM cost', `$${s.totalCostUsd.toFixed(4)}`),
-    field('degraded', 'Degraded verdicts', `${s.degradedTotal} (Reasoner failed twice)`),
-    field('recommendation_mix', 'Recommendation mix', formatBreakdown(s.byRecommendation)),
-    field('tier_mix', 'Strategy tier mix', formatBreakdown(s.byTier)),
-    field(
-      'alignment',
-      'Alignment rate',
-      s.feedbackTotal > 0
-        ? `${Math.round(s.alignmentRate * 100)}% (${s.feedbackAligned}/${s.feedbackTotal})`
-        : 'no feedback yet',
-    ),
-    field('mod_action_mix', 'Mod actions taken', formatBreakdown(s.byModAction)),
-  ];
-
-  return c.json<UiResponse>(
-    {
-      showForm: {
-        name: 'wipeMemory', // reusing the registered form name; we only show fields
-        form: {
-          title: '📊 ModPilot stats',
-          acceptLabel: 'Close',
-          cancelLabel: 'Close',
-          fields,
-        },
-      },
-    },
-    200,
-  );
 });
-
-function field(name: string, label: string, value: string): {
-  name: string;
-  label: string;
-  type: 'string';
-  defaultValue: string;
-  disabled: true;
-} {
-  return { name, label, type: 'string', defaultValue: value, disabled: true };
-}
-
-function formatBreakdown(counts: Record<string, number>): string {
-  const parts = Object.entries(counts)
-    .filter(([, v]) => v > 0)
-    .sort((a, b) => b[1] - a[1])
-    .map(([k, v]) => `${k}: ${v}`);
-  return parts.length > 0 ? parts.join(' · ') : '—';
-}

@@ -25,6 +25,88 @@
       <div class="loading-line">ModPilot is investigating…</div>
     </div>
 
+    <!-- ModPilot: Stats — custom-post view. Hidden until the dispatcher
+         resolves the post kind and decides to render this view. -->
+    <section id="stats-view" class="section" hidden>
+      <div class="stats-hero">
+        <div class="stats-hero-kicker" id="stats-hero-kicker">Subreddit · loading…</div>
+        <h2 class="stats-hero-title">ModPilot · Stats</h2>
+        <div class="stats-hero-sub" id="stats-hero-sub">—</div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card" id="stat-investigations">
+          <div class="stat-label">Investigations run</div>
+          <div class="stat-value" id="sv-investigations">—</div>
+          <div class="stat-help">Lifetime count of "Investigate with ModPilot"</div>
+        </div>
+        <div class="stat-card" id="stat-confidence">
+          <div class="stat-label">Avg calibrated confidence</div>
+          <div class="stat-value" id="sv-confidence">—<span class="pct">%</span></div>
+          <div class="stat-help">Honest about uncertainty when low</div>
+        </div>
+        <div class="stat-card" id="stat-latency">
+          <div class="stat-label">Avg latency</div>
+          <div class="stat-value" id="sv-latency">—<span class="pct">s</span></div>
+          <div class="stat-help">Wall-clock per investigation</div>
+        </div>
+        <div class="stat-card" id="stat-cost">
+          <div class="stat-label">Total LLM cost</div>
+          <div class="stat-value" id="sv-cost">$—</div>
+          <div class="stat-help" id="sv-cost-help">—</div>
+        </div>
+        <div class="stat-card" id="stat-alignment">
+          <div class="stat-label">Alignment with your team</div>
+          <div class="stat-value" id="sv-alignment">—</div>
+          <div class="stat-help" id="sv-alignment-help">Descriptive only · never used to override decisions</div>
+        </div>
+        <div class="stat-card" id="stat-degraded">
+          <div class="stat-label">Degraded verdicts</div>
+          <div class="stat-value" id="sv-degraded">—</div>
+          <div class="stat-help" id="sv-degraded-help">—</div>
+        </div>
+      </div>
+
+      <!-- Recent actions carousel — most recent N investigations that had a
+           moderator action applied, each card explaining the recommendation. -->
+      <div class="stats-recent" id="stats-recent" hidden>
+        <div class="stats-recent-head">
+          <div class="bd-title" style="border:none; padding:0; margin:0;">Recent actions</div>
+          <div class="stats-recent-aside" id="stats-recent-aside">—</div>
+        </div>
+        <div class="recent-carousel" id="recent-carousel"></div>
+      </div>
+
+      <div class="stats-breakdowns">
+        <div class="bd-block" id="bd-recommendations">
+          <div class="bd-title">Recommendation mix</div>
+          <ul class="bd-bars" id="bd-rec-bars"></ul>
+        </div>
+        <div class="bd-block" id="bd-tiers">
+          <div class="bd-title">Investigation depth</div>
+          <ul class="bd-bars" id="bd-tier-bars"></ul>
+        </div>
+        <div class="bd-block" id="bd-actions">
+          <div class="bd-title">Actions you took</div>
+          <ul class="bd-bars" id="bd-action-bars"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Case Resolution Banner — surfaces above the verdict when this target
+         has already been actioned. Mod sees "CASE RESOLVED · Removed by u/X". -->
+    <div id="resolution-banner" class="resolution-banner" hidden></div>
+
+    <!-- Priority Marquee — top-level urgency display. More prominent than
+         confidence per the case-management philosophy. -->
+    <div id="priority-marquee" class="priority-marquee" hidden>
+      <div class="pm-left">
+        <div class="pm-headline" id="pm-headline">—</div>
+        <div class="pm-sub" id="pm-sub">Priority score</div>
+      </div>
+      <div class="pm-score" id="pm-score">—</div>
+    </div>
+
     <!-- Verdict Card -->
     <section id="verdict-card" class="section" hidden>
       <article class="verdict" data-tier="">
@@ -34,16 +116,9 @@
             <h3 class="v-title" id="v-title">—</h3>
           </div>
           <div class="v-header-pills">
-            <span class="priority-pill" id="priority-pill" hidden>—</span>
             <span class="risk-pill" id="risk-pill">—</span>
           </div>
         </div>
-
-        <!-- Feature 5: escalation banner -->
-        <div class="escalation-banner" id="escalation-banner" hidden></div>
-
-        <!-- Features 2 + 7: author signal -->
-        <div class="author-signal" id="author-signal" hidden></div>
 
         <div class="conf-row">
           <span class="conf-label">Confidence</span>
@@ -57,7 +132,23 @@
         <!-- Honest uncertainty marginalia — only visible when LOW confidence -->
         <div class="marginalia" id="marginalia" hidden></div>
 
-        <ul class="evidence" id="evidence"></ul>
+        <!-- Current Content Assessment — what the post itself does (Stage 1).
+             Visually separated from history so the moderator never confuses
+             "this author has 3 prior removals" with "this post violates a rule". -->
+        <div class="evidence-section evidence-content" id="evidence-content-section" hidden>
+          <div class="evidence-section-title">Current Content Assessment</div>
+          <ul class="evidence" id="evidence"></ul>
+          <!-- Feature 5 (escalation) lives in this content section now —
+               it's about the THREAD, not the author. -->
+          <div class="escalation-banner" id="escalation-banner" hidden></div>
+        </div>
+
+        <!-- Moderator Memory — institutional history about the author.
+             Stage 2 input only; never primary evidence of guilt. -->
+        <div class="evidence-section evidence-memory" id="memory-section" hidden>
+          <div class="evidence-section-title">Moderator Memory</div>
+          <div class="memory-card" id="memory-card">—</div>
+        </div>
 
         <div class="actions" id="actions"></div>
 

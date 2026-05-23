@@ -28,14 +28,38 @@ const STATUS_GLYPH = { success: '✓', failure: '✗', skipped: '⊘', timeout: 
 
 const ACTIONS = ['Remove', 'Approve', 'Escalate', 'Lock'];
 
-// Render the "recommend Remove." style title with bold action.
+// Render the verdict title. Confidence-aware:
+//   conf >= 0.80 → "Recommend Remove." (firm)
+//   conf >= 0.60 → "Suggest Remove."   (qualified)
+//   conf < 0.60  → "Review Recommended" / "Potential Rule Concern" etc.
+//     We deliberately do NOT say "Suggest Remove · 36%" — that pairing
+//     reads as a contradiction (the engine is asking you to remove but
+//     also saying it's unsure). The moderator-facing label has to match
+//     the confidence band.
 function titleFor(verdict) {
   const r = verdict.recommendation;
+  const conf = verdict.calibrated_confidence ?? 0;
+
   if (r === 'NO_RECOMMENDATION') {
     return `<em>ModPilot is unsure —</em><br/><strong>your call.</strong>`;
   }
+
+  if (conf < 0.60) {
+    // Low-conf: name the concern without dressing it as a recommendation.
+    if (r === 'REMOVE' || r === 'LOCK') {
+      return `<em>Potential rule concern —</em><br/><strong>review recommended.</strong>`;
+    }
+    if (r === 'APPROVE') {
+      return `<em>No clear rule violation —</em><br/><strong>review and approve if you agree.</strong>`;
+    }
+    if (r === 'ESCALATE') {
+      return `<em>Mixed signals —</em><br/><strong>escalation considered.</strong>`;
+    }
+    return `<em>Evidence found —</em><br/><strong>human review advised.</strong>`;
+  }
+
   const word = { REMOVE: 'Remove', APPROVE: 'Approve', ESCALATE: 'Escalate', LOCK: 'Lock' }[r];
-  const verb = verdict.calibrated_confidence >= 0.80 ? 'Recommend' : 'Suggest';
+  const verb = conf >= 0.80 ? 'Recommend' : 'Suggest';
   return `${verb} <strong>${word}.</strong>`;
 }
 
@@ -161,13 +185,119 @@ function escapeHtml(s) {
     .replace(/'/g, '&#39;');
 }
 
-// ── Feature 1: priority pill in the header ──────────────────────────────
-function renderPriorityPill(priority) {
-  const el = document.getElementById('priority-pill');
-  if (!priority || typeof priority.score !== 'number') return;
+// ── Improvement 1: Priority Marquee (prominent top-of-card display) ─────
+function renderPriorityMarquee(priority) {
+  const el = document.getElementById('priority-marquee');
+  if (!el || !priority || typeof priority.score !== 'number') return;
   el.hidden = false;
   el.dataset.bucket = priority.bucket || 'low_risk';
-  el.textContent = `${priority.headline || 'ℹ️ Low Risk'} · ${priority.score}`;
+  const head = priority.headline || 'ℹ️ Low Risk';
+  document.getElementById('pm-headline').textContent = head.replace(/^[^\s]+\s+/, '').toUpperCase();
+  document.getElementById('pm-headline').dataset.emoji = (head.match(/^\S+/) || [''])[0];
+
+  // When the score is genuinely 0 (no urgency signals at all — typical for
+  // an APPROVE case on a first-time author with no reports), showing a
+  // big "0" reads as broken. Hide the number; let the bucket carry the
+  // meaning. Subtitle adapts to make it informative.
+  const scoreEl = document.getElementById('pm-score');
+  if (priority.score === 0) {
+    scoreEl.textContent = '✓';
+    scoreEl.dataset.state = 'zero';
+    document.getElementById('pm-sub').textContent = 'No urgent triage signals';
+  } else {
+    scoreEl.textContent = String(priority.score);
+    scoreEl.dataset.state = '';
+    document.getElementById('pm-sub').textContent =
+      priority.bucket === 'urgent'
+        ? 'Top of queue — review now'
+        : priority.bucket === 'review_soon'
+          ? 'Surface in next review pass'
+          : 'Low risk — review when convenient';
+  }
+}
+
+// ── Improvement 3: Case Resolution Banner ────────────────────────────────
+function renderResolutionBanner(verdict, target) {
+  const el = document.getElementById('resolution-banner');
+  if (!el || !target || !target.resolution) return;
+  const r = target.resolution;
+  const action = String(r.modAction || r.mod_action || '').toUpperCase();
+  const mod = r.moderatorName || r.moderator_name || 'a moderator';
+  el.hidden = false;
+  el.dataset.action = action.toLowerCase();
+  el.innerHTML = `
+    <span class="rb-label">CASE RESOLVED</span>
+    <span class="rb-detail">${escapeHtml(action.toLowerCase())} by u/${escapeHtml(mod)}</span>
+  `;
+}
+
+// ── Improvement 2: Moderator Memory panel (replaces compact author signal) ─
+function renderModeratorMemory(signal) {
+  const section = document.getElementById('memory-section');
+  const card = document.getElementById('memory-card');
+  if (!section || !card || !signal || !signal.headline) {
+    if (section) section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  card.dataset.kind = signal.kind || 'neutral';
+  card.innerHTML = `
+    <div class="mm-headline">${escapeHtml(signal.headline)}</div>
+    <div class="mm-detail">${escapeHtml(signal.detail || '')}</div>
+    <div class="mm-disclaimer">Context for the response — never primary evidence of guilt.</div>
+  `;
+}
+
+// ── Content evidence section (Stage 1 of the two-stage model) ───────────
+// Renders the Reasoner's content_findings (checkmark bullets) when present.
+// Falls back to content-tool evidence rows (rule_match, thread_context).
+// NEVER falls back to user_history / prior_actions — those are author
+// metadata and belong in the Moderator Memory panel, not Content Assessment.
+function renderContentEvidence(verdict) {
+  const section = document.getElementById('evidence-content-section');
+  const ul = document.getElementById('evidence');
+  if (!section || !ul) return;
+
+  const findings = Array.isArray(verdict.content_findings) ? verdict.content_findings : [];
+
+  // Prefer Stage 1 content findings from the Reasoner.
+  if (findings.length > 0) {
+    ul.innerHTML = '';
+    findings.forEach((finding, i) => {
+      const li = document.createElement('li');
+      const text = String(finding);
+      // Extract a leading glyph if present so we can style it.
+      const m = text.match(/^([✓⚠✗])\s*(.*)$/);
+      const glyph = m ? m[1] : '•';
+      const body = m ? m[2] : text;
+      const klass =
+        glyph === '✓' ? 'cf-good' : glyph === '⚠' ? 'cf-warn' : glyph === '✗' ? 'cf-bad' : 'cf-neutral';
+      li.className = `content-finding ${klass}`;
+      li.innerHTML = `
+        <span class="marker">${String(i + 1).padStart(2, '0')}</span>
+        <span class="finding-glyph">${escapeHtml(glyph)}</span>
+        <span class="claim">${escapeHtml(body)}</span>
+      `;
+      ul.appendChild(li);
+    });
+    section.hidden = false;
+    return;
+  }
+
+  // Fallback: content-tool evidence rows ONLY. Never user_history / prior_actions.
+  const evidence = Array.isArray(verdict.top_evidence) ? verdict.top_evidence : [];
+  const contentRows = evidence.filter(
+    (r) => r.tool === 'policy_match' || r.tool === 'thread_context',
+  );
+  if (contentRows.length === 0) {
+    // No content-level data → hide the section entirely rather than show
+    // author metadata under the wrong heading.
+    section.hidden = true;
+    ul.innerHTML = '';
+    return;
+  }
+  renderEvidence(contentRows);
+  section.hidden = false;
 }
 
 // ── Feature 5: escalation banner ─────────────────────────────────────────
@@ -338,6 +468,14 @@ function setModalStatus(text, kind) {
 }
 
 function wireResponseModal() {
+  // Belt-and-suspenders: force-hide the modal at boot. The [hidden] HTML
+  // attribute does this via CSS, but if a style rule overrides it the
+  // modal can leak in. This guarantees the only way it opens is via a
+  // moderator action button click.
+  const modal = document.getElementById('response-modal');
+  if (modal) modal.hidden = true;
+  _modalState = null;
+
   document.getElementById('rm-close')?.addEventListener('click', closeResponseModal);
 
   document.getElementById('rm-skip')?.addEventListener('click', async () => {
@@ -399,7 +537,13 @@ function wireResponseModal() {
 }
 
 async function generateDraft() {
-  if (!_modalState) return;
+  if (!_modalState) {
+    // Modal opened without an action click — defensive log + visible error
+    // so we never silently no-op again.
+    console.warn('modpilot.modal.generate_no_state');
+    setModalStatus('Click an action button (Remove/Approve/Lock/Escalate) first.', 'error');
+    return;
+  }
   const { label, verdict } = _modalState;
   const instructions = document.getElementById('rm-instructions').value;
   setModalStatus('Generating draft…', 'pending');
@@ -433,16 +577,20 @@ function ensureStatusEl() {
 async function load() {
   const root = document.getElementById('root');
   try {
-    // /api/verdict (no params) — server resolves correlation_id from
-    // context.postId → post_correlation:{postId} Redis mapping that
-    // menu.ts writes when it creates the custom post.
+    // /api/verdict dispatches by post_kind:
+    //   - 'stats' → returns { kind: 'stats', ...SubredditStats }
+    //   - verdict (default) → returns regular Verdict
     const res = await fetch('/api/verdict', {
       headers: { 'Accept': 'application/json' },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const body = await res.json();
     if (!body.ok) throw new Error(body.error?.message ?? 'unknown error');
-    render(body.data, body.target);
+    if (body.data?.kind === 'stats') {
+      renderStats(body.data);
+    } else {
+      render(body.data, body.target);
+    }
     root.dataset.state = 'ready';
   } catch (err) {
     console.error('modpilot.load.failed', err);
@@ -495,17 +643,24 @@ function render(verdict, target) {
     m.textContent = "I found the following but I'm not confident enough to recommend an action. Your judgment matters here.";
   }
 
-  // ── New panels (Features 1, 2, 4, 5, 6, 7, 8) ──
-  renderPriorityPill(verdict.priority);
+  // ── Top-of-card surfaces ──
+  renderResolutionBanner(verdict, target);
+  renderPriorityMarquee(verdict.priority);
   renderEscalationBanner(verdict.escalation);
-  renderAuthorSignal(verdict.author_signal);
+
+  // ── Stage 1: Current Content Assessment (the content evidence + thread) ──
+  renderContentEvidence(verdict);
+
+  // ── Stage 2: Moderator Memory (the author-history panel) ──
+  renderModeratorMemory(verdict.author_signal);
+
+  // ── Explainability panels ──
   renderConfidenceFactors(verdict.confidence_factors);
   renderKeyFactors(verdict.key_factors);
   renderRuleMatches(verdict.rule_matches);
   renderAlignmentLine(verdict.alignment);
 
-  // Evidence + actions
-  renderEvidence(verdict.top_evidence);
+  // Actions
   renderActions(verdict);
 
   // Footer
@@ -525,3 +680,201 @@ function render(verdict, target) {
 
 load();
 wireResponseModal();
+
+// ─────────────────────────────────────────────────────────────────────────
+// ModPilot: Stats — renderer for the custom-post Stats view.
+// Receives a SubredditStats payload (snake_case keys from /api/verdict
+// when kind === 'stats').
+// ─────────────────────────────────────────────────────────────────────────
+
+function renderStats(stats) {
+  document.getElementById('loading-state').hidden = true;
+  document.getElementById('verdict-card')?.setAttribute('hidden', '');
+  document.getElementById('timeline-section')?.setAttribute('hidden', '');
+  document.getElementById('stats-view').hidden = false;
+
+  // Masthead
+  document.getElementById('case-kicker').textContent = `Stats dashboard · live`;
+  document.getElementById('case-subject').innerHTML =
+    `<em>Subreddit-wide moderation metrics</em>`;
+
+  // Hero header inside the stats view
+  document.getElementById('stats-hero-kicker').textContent = stats.sub_id ?? '—';
+  document.getElementById('stats-hero-sub').textContent =
+    stats.investigationsTotal === 0
+      ? 'No investigations yet. Try "Investigate with ModPilot" on a post.'
+      : `Live across ${stats.investigationsTotal} investigation${stats.investigationsTotal === 1 ? '' : 's'}.`;
+
+  // Hero stat cards
+  document.getElementById('sv-investigations').textContent = String(stats.investigationsTotal);
+
+  const avgConfPct = Math.round((stats.avgConfidence ?? 0) * 100);
+  document.getElementById('sv-confidence').innerHTML = `${avgConfPct}<span class="pct">%</span>`;
+
+  const avgLatency = ((stats.avgLatencyMs ?? 0) / 1000).toFixed(2);
+  document.getElementById('sv-latency').innerHTML = `${avgLatency}<span class="pct">s</span>`;
+
+  const cost = (stats.totalCostUsd ?? 0).toFixed(4);
+  document.getElementById('sv-cost').textContent = `$${cost}`;
+  const perInv =
+    stats.investigationsTotal > 0
+      ? (stats.totalCostUsd / stats.investigationsTotal).toFixed(4)
+      : '0.0000';
+  document.getElementById('sv-cost-help').textContent = `≈ $${perInv} per investigation`;
+
+  // Alignment
+  const alignmentEl = document.getElementById('sv-alignment');
+  const alignmentHelp = document.getElementById('sv-alignment-help');
+  if (stats.feedbackTotal >= 5) {
+    const pct = Math.round((stats.alignmentRate ?? 0) * 100);
+    alignmentEl.innerHTML = `${pct}<span class="pct">%</span>`;
+    alignmentHelp.textContent =
+      `${stats.feedbackAligned} of ${stats.feedbackTotal} mod actions matched ModPilot · descriptive only`;
+  } else {
+    alignmentEl.textContent = 'gathering';
+    alignmentHelp.textContent = `Needs ≥ 5 mod actions · currently ${stats.feedbackTotal}`;
+  }
+
+  // Degraded
+  const degradedEl = document.getElementById('sv-degraded');
+  const degradedHelp = document.getElementById('sv-degraded-help');
+  const degradedCount = stats.degradedTotal ?? 0;
+  degradedEl.textContent = String(degradedCount);
+  if (degradedCount === 0) {
+    degradedEl.dataset.state = 'good';
+    degradedHelp.textContent = 'Every verdict passed citation validation';
+  } else {
+    degradedEl.dataset.state = 'warn';
+    degradedHelp.textContent = `Reasoner failed citation contract twice → fell back to NO_RECOMMENDATION`;
+  }
+
+  // Breakdown bars
+  renderBars(document.getElementById('bd-rec-bars'), stats.byRecommendation || {});
+  renderBars(document.getElementById('bd-tier-bars'), stats.byTier || {});
+  renderBars(document.getElementById('bd-action-bars'), stats.byModAction || {});
+
+  // Improvement 10: extra hero stats — avg priority + author-kind split.
+  // Append to the hero subtitle so they stay in the case-file aesthetic
+  // (no new card with bright colors).
+  const heroExtras = [];
+  if (typeof stats.avgPriority === 'number' && stats.avgPriority > 0) {
+    heroExtras.push(`avg priority ${Math.round(stats.avgPriority)}`);
+  }
+  const ak = stats.byAuthorKind || {};
+  if (ak.repeat > 0 || ak.first_time > 0 || ak.positive > 0) {
+    const parts = [];
+    if (ak.repeat > 0) parts.push(`${ak.repeat} repeat`);
+    if (ak.first_time > 0) parts.push(`${ak.first_time} first-time`);
+    if (ak.positive > 0) parts.push(`${ak.positive} positive-history`);
+    heroExtras.push(parts.join(' · '));
+  }
+  if (heroExtras.length > 0) {
+    const sub = document.getElementById('stats-hero-sub');
+    if (sub) sub.textContent = `${sub.textContent} · ${heroExtras.join(' · ')}`;
+  }
+
+  // Recent actions carousel
+  renderRecentActions(stats.recent_actions || []);
+
+  document.getElementById('root').dataset.state = 'ready';
+}
+
+function renderRecentActions(actions) {
+  const container = document.getElementById('stats-recent');
+  const carousel = document.getElementById('recent-carousel');
+  const aside = document.getElementById('stats-recent-aside');
+  if (!Array.isArray(actions) || actions.length === 0) {
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
+  aside.textContent = `${actions.length} most recent · scroll →`;
+  carousel.innerHTML = '';
+
+  for (const a of actions) {
+    const card = document.createElement('article');
+    card.className = `recent-card recent-${(a.modAction || '').toLowerCase()}`;
+    const confPct = Math.round((a.calibratedConfidence ?? 0) * 100);
+    const aligned =
+      a.aligned === true
+        ? `<span class="rc-aligned">✓ aligned with ModPilot</span>`
+        : a.aligned === false
+          ? `<span class="rc-override">↺ overrode ModPilot's ${escapeHtml(String(a.recommendation || '').toLowerCase())}</span>`
+          : '';
+    const applied = a.actionApplied
+      ? `<span class="rc-applied">applied on Reddit</span>`
+      : `<span class="rc-recorded">recorded</span>`;
+
+    const rationaleHtml = a.rationale
+      ? escapeHtml(a.rationale).replace(
+          /\[(ev-\d+)\]/g,
+          (_m, id) => `<span class="ev-chip">${id.replace('-', '·')}</span>`,
+        )
+      : '<em>(no rationale)</em>';
+
+    const ts = a.at ? timeAgo(a.at) : '—';
+    const targetExcerpt = a.targetTitle
+      ? escapeHtml(a.targetTitle)
+      : escapeHtml(a.targetId || '(unknown)');
+
+    card.innerHTML = `
+      <div class="rc-head">
+        <span class="rc-action rc-action-${(a.modAction || '').toLowerCase()}">${escapeHtml(a.modAction || '—')}</span>
+        <span class="rc-conf">${confPct}% conf · ${escapeHtml(a.riskTier || '')}</span>
+      </div>
+      <h3 class="rc-target">${targetExcerpt}</h3>
+      <div class="rc-author">by u/${escapeHtml(a.targetAuthor || 'unknown')} · ${escapeHtml(a.targetKind || '')}</div>
+      <div class="rc-why">
+        <div class="rc-why-label">Why this was recommended</div>
+        <p class="rc-rationale">${rationaleHtml}</p>
+      </div>
+      <div class="rc-foot">
+        <span class="rc-foot-left">${aligned} · ${applied}</span>
+        <span class="rc-foot-right">${ts}</span>
+      </div>
+      ${a.permalink ? `<a class="rc-link" href="${a.permalink}" target="_blank" rel="noopener">View target ↗</a>` : ''}
+    `;
+    carousel.appendChild(card);
+  }
+}
+
+function timeAgo(iso) {
+  try {
+    const then = new Date(iso).getTime();
+    const diffSec = Math.max(0, Math.floor((Date.now() - then) / 1000));
+    if (diffSec < 60) return `${diffSec}s ago`;
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+    return `${Math.floor(diffSec / 86400)}d ago`;
+  } catch {
+    return '—';
+  }
+}
+
+function renderBars(ul, counts) {
+  ul.innerHTML = '';
+  const entries = Object.entries(counts)
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1]);
+  if (entries.length === 0) {
+    const li = document.createElement('li');
+    li.className = 'bd-empty';
+    li.textContent = '— no data yet';
+    ul.appendChild(li);
+    return;
+  }
+  const max = entries.reduce((m, [, v]) => Math.max(m, v), 1);
+  const total = entries.reduce((sum, [, v]) => sum + v, 0);
+  for (const [k, v] of entries) {
+    const li = document.createElement('li');
+    li.className = 'bd-bar';
+    const widthPct = Math.max(6, Math.round((v / max) * 100));
+    const sharePct = Math.round((v / total) * 100);
+    li.innerHTML = `
+      <span class="bd-bar-label">${escapeHtml(k)}</span>
+      <span class="bd-bar-track"><span class="bd-bar-fill" style="width: ${widthPct}%"></span></span>
+      <span class="bd-bar-count">${v}<span class="bd-bar-share"> · ${sharePct}%</span></span>
+    `;
+    ul.appendChild(li);
+  }
+}

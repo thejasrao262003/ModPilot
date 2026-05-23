@@ -69,17 +69,33 @@ describe('deriveConfidenceFactors', () => {
     ruleMatchScore: 0.0,
     escalationLevel: 'none' as const,
     authorSignal: baseAuthor,
+    recommendation: 'REMOVE' as const,
   };
 
-  it('lists "down" factors for cold-start + weak rule match', () => {
+  it('lists "down" factors for cold-start + weak rule match (REMOVE)', () => {
     const f = deriveConfidenceFactors({ ...base, coldStart: true });
     expect(f.some((x) => x.direction === 'down' && /cold-start/i.test(x.reason))).toBe(true);
     expect(f.some((x) => x.direction === 'down' && /Weak rule match/i.test(x.reason))).toBe(true);
   });
 
-  it('lists "up" factor for strong rule match', () => {
+  it('skips cold-start demotion for APPROVE', () => {
+    const f = deriveConfidenceFactors({ ...base, coldStart: true, recommendation: 'APPROVE' });
+    expect(f.some((x) => x.direction === 'down' && /cold-start/i.test(x.reason))).toBe(false);
+  });
+
+  it('lists "up" factor for strong rule match on REMOVE', () => {
     const f = deriveConfidenceFactors({ ...base, ruleMatchScore: 0.7 });
     expect(f.some((x) => x.direction === 'up' && /Strong rule match/i.test(x.reason))).toBe(true);
+  });
+
+  it('lists "up" factor for weak rule match on APPROVE (inverted)', () => {
+    const f = deriveConfidenceFactors({ ...base, ruleMatchScore: 0.1, recommendation: 'APPROVE' });
+    expect(f.some((x) => x.direction === 'up' && /No rule clearly applies/i.test(x.reason))).toBe(true);
+  });
+
+  it('lists "down" factor for strong rule match on APPROVE (model overrode)', () => {
+    const f = deriveConfidenceFactors({ ...base, ruleMatchScore: 0.7, recommendation: 'APPROVE' });
+    expect(f.some((x) => x.direction === 'down' && /matched a rule/i.test(x.reason))).toBe(true);
   });
 
   it('lists "up" factor when escalation is moderate+', () => {
@@ -149,9 +165,12 @@ describe('deriveKeyFactors', () => {
     }
   });
 
-  it('flags report velocity spike at z >= 3', () => {
+  it('flags high community attention (renamed from "velocity spike") at z >= 3 as neutral', () => {
     const fs = deriveKeyFactors({ ...base, velocityZscore: 3.5 });
-    expect(fs.some((x) => /velocity/i.test(x.label) && x.impact === 'high')).toBe(true);
+    const hit = fs.find((x) => /community attention/i.test(x.label));
+    expect(hit?.impact).toBe('high');
+    // Reports raise priority but never imply violation → 'neutral' direction.
+    expect(hit?.direction).toBe('neutral');
   });
 });
 

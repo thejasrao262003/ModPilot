@@ -12,6 +12,11 @@ export type SubredditProfile = {
   rules: string;
   coldStartCount: number;
   tierOverride: TierOverride;
+  // Per-subreddit Gemini API key (Feature: BYO key). Each installing mod team
+  // sets their own via "Configure policy" so the bill goes to their Google
+  // account. Stored in Devvit-managed Redis (encrypted at rest by Reddit).
+  // Empty string means "use the build-time default in geminiConfig.local.ts".
+  geminiApiKey: string;
 };
 
 const DEFAULTS: SubredditProfile = {
@@ -20,6 +25,7 @@ const DEFAULTS: SubredditProfile = {
   rules: '',
   coldStartCount: 0,
   tierOverride: 'auto',
+  geminiApiKey: '',
 };
 
 export async function ensureSubredditProfile(subId: string): Promise<SubredditProfile> {
@@ -57,5 +63,6 @@ function parseProfile(row: Record<string, string>): SubredditProfile {
     rules: row.rules || DEFAULTS.rules,
     coldStartCount,
     tierOverride,
+    geminiApiKey: row.gemini_api_key || '',
   };
 }

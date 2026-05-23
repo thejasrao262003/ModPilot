@@ -47,6 +47,11 @@ export type InvestigateInput = {
   target: {
     kind: 'comment' | 'post';
     id: string;
+    // For posts: the headline string. Distinct from body — the title is
+    // where character attacks like "Rohit is a clown" usually live, and
+    // the Reasoner must see it to judge the content correctly. Comments
+    // have no separate title.
+    title: string;
     body: string;
     author: string;
   };
@@ -115,10 +120,18 @@ export async function runInvestigation(args: {
     ? threadMem.modActionsTaken > 0 || threadMem.escalationTurn !== null
     : false;
 
+  // For posts, the title often carries the actual content judgment ("Rohit
+  // is a clown" lives in the title; the body might be milder). The Reasoner
+  // sees both; the rule-match precheck scans both. Comments have no title.
+  const titlePlusBody = [args.input.target.title, args.input.target.body]
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+
   // 0. Rule-match precheck. Substring score over content words across configured
   //    rules. Feeds Strategy Selector + Calibrator and is appended as a real
   //    evidence row so the Reasoner can cite it.
-  const ruleMatch = computeRuleMatch(args.input.target.body, profile.rules);
+  const ruleMatch = computeRuleMatch(titlePlusBody, profile.rules);
   console.log('engine.rule_match', {
     correlation_id: args.input.correlationId,
     score: ruleMatch.score,
@@ -188,6 +201,7 @@ export async function runInvestigation(args: {
     rules: profile.rules,
     targetKind: args.input.target.kind,
     targetId: args.input.target.id,
+    targetTitle: args.input.target.title,
     targetBody: args.input.target.body,
     targetAuthor: args.input.target.author,
     reporterCount: args.input.reporterCount,
@@ -223,6 +237,7 @@ export async function runInvestigation(args: {
     validationPassed: !validationFlag,
     coldStart,
     isPartial,
+    recommendation: reasonerOutput.recommendation,
   });
 
   // 4b. Deterministic explainability surfaces (Features 1, 2, 4, 5, 6, 7, 8).
@@ -259,6 +274,7 @@ export async function runInvestigation(args: {
     ruleMatchScore: ruleMatch.score,
     escalationLevel: escalation.level,
     authorSignal,
+    recommendation: reasonerOutput.recommendation,
   });
 
   const keyFactors = deriveKeyFactors({
@@ -339,6 +355,9 @@ export async function runInvestigation(args: {
       sampleSize: alignmentSnapshot.total,
       aligned: alignmentSnapshot.aligned,
     },
+    contentFindings: Array.isArray(reasonerOutput.content_findings)
+      ? reasonerOutput.content_findings.slice(0, 6)
+      : [],
   };
 
   // 6. Persist (best-effort; investigation row used by prior_actions next time).
@@ -432,6 +451,7 @@ function fallbackOutput(): ReasonerOutput {
     raw_confidence: 0,
     cited_evidence_ids: ['ev-1'],
     flags: ['reasoner_failed'],
+    content_findings: [],
   };
 }
 

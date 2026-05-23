@@ -50,7 +50,10 @@ export function computePriority(inp: Inputs): PriorityResult {
   const velocityContribution = Math.min(20, Math.max(0, Math.round(inp.velocityZscore * 5)));
   const reporterContribution = Math.min(15, Math.max(0, inp.reporterCount * 3));
   const pressure = velocityContribution + reporterContribution;
-  if (pressure > 0) drivers.push({ label: 'report pressure', weight: pressure });
+  // Reports raise *urgency* (priority/triage), not violation probability.
+  // Labeled accordingly so the driver list never reads as "more reports
+  // = more guilty".
+  if (pressure > 0) drivers.push({ label: 'community attention (reports)', weight: pressure });
 
   // 3) User risk.
   let userContribution = 0;

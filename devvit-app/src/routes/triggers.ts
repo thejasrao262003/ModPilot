@@ -84,21 +84,74 @@ async function runOnboarding(args: {
 const ONBOARDING_MODMAIL = [
   "Welcome to ModPilot — context-aware moderation for Reddit.",
   "",
-  "ModPilot investigates reports by running 4 lookups (rule match, report velocity, user history, prior actions) and asks Gemini 2.5 Pro to produce a recommendation with cited evidence. Every action requires your click — we never act on our own.",
+  "ModPilot investigates reports by running the lookups an experienced moderator does manually (rule match, thread context, author history, prior actions) and produces a recommendation with cited evidence. Every action requires your click — we never act on our own.",
   "",
-  "▶ Two minutes of setup:",
-  "1. Open this subreddit's mod tools → menu (kebab/⋯ icon) → choose \"ModPilot: Configure policy\".",
-  "2. Pick a moderation posture: Strict, Balanced, or Lenient.",
-  "3. Paste your subreddit's rules into the rules field — ModPilot uses them as context on every investigation, and the Reasoner will cite them by name in its recommendations.",
-  "4. (Optional) Set a region/cultural context and an investigation-depth override.",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "STEP 1 — Open the policy form (where to click)",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
   "",
-  "▶ Using it:",
-  "On any reported post or comment, the menu shows \"Investigate with ModPilot\". One click opens a verdict view with the recommendation, confidence, and evidence trail. You decide whether to Remove/Approve/Lock/Escalate from there.",
+  "1. Go to your subreddit's home page (the main r/yoursubreddit page, not Mod Tools).",
+  "2. Look for the three-dot menu (⋯) in the subreddit's top-right header bar — same row as the community icon and the Joined / Created button.",
+  "3. Click it. A dropdown will appear.",
+  "4. Choose \"ModPilot: Configure policy\".",
   "",
-  "▶ Watch your stats:",
-  "Subreddit-level menu → \"ModPilot: Stats\" gives a running tally of investigations, alignment rate, and cost.",
+  "(If you don't see the dropdown item, hard-refresh the page — Reddit caches the community menu for a few minutes after install.)",
   "",
-  "Honest defaults until you configure: Balanced posture, no custom rules, auto-tier. The investigation still works — it'll just have less subreddit-specific context to weigh.",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "STEP 2 — Fill in the form",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "",
+  "The form has five fields. Here's what each one does:",
+  "",
+  "1. MODERATION POSTURE  (required)",
+  "   Pick one of: Strict / Balanced / Lenient.",
+  "   This shifts how ModPilot weighs borderline content. Strict subs see ModPilot lean toward removal once a violation is detected; lenient subs see it give the benefit of the doubt. It never changes whether ModPilot *finds* a violation — only how it responds to one. Balanced is the default.",
+  "",
+  "2. SUBREDDIT RULES  (recommended — leave blank if you have none)",
+  "   Paste your subreddit's rule list as plain text. Example:",
+  "     Rule 1: No personal attacks.",
+  "     Rule 2: No off-topic posts.",
+  "     Rule 3: Respect for players is required.",
+  "   ModPilot's Reasoner reads these on every investigation and cites them by number in the recommendation. Without rules, the engine still works but has less subreddit-specific context — it falls back to general civility judgment.",
+  "",
+  "3. REGION / CULTURAL CONTEXT  (optional)",
+  "   Short string (e.g. \"India\", \"Australia, England\", \"Global\"). Surfaces region-specific norms so the Reasoner can weigh culturally-specific language. Use \"Global\" if you have no preference.",
+  "",
+  "4. INVESTIGATION DEPTH OVERRIDE  (optional)",
+  "   Pick one of:",
+  "     - Auto (default) — Strategy Selector picks Fast / Standard / Deep per report",
+  "     - Always FAST — 2 tools, ~1 second per investigation, $0.003",
+  "     - Always STANDARD — 4 tools, ~3 seconds per investigation, $0.012",
+  "     - Always DEEP — 5+ tools, ~6 seconds per investigation, $0.030",
+  "   Most subreddits should leave this on Auto.",
+  "",
+  "5. GEMINI API KEY  (optional but recommended for production use)",
+  "   Paste your own Google AI Studio API key (starts with \"AIza\"). Get one free at https://aistudio.google.com/app/apikey. When set, all investigations bill to your Google account. When blank, ModPilot uses the app default — fine for trying it out, but please set your own key for sustained use.",
+  "",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "STEP 3 — Run your first investigation",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "",
+  "On any reported post or comment, click the three-dot menu (⋯) on the post itself — you'll see \"Investigate with ModPilot\". One click opens a verdict view in your mod queue with:",
+  "  • the recommendation (Remove / Approve / Lock / Escalate / Review)",
+  "  • a confidence score with honest uncertainty if the evidence is weak",
+  "  • the evidence trail (every tool that ran + what it found)",
+  "  • a draft moderator reply (optional, generated on demand)",
+  "You decide whether to take action.",
+  "",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "Tracking your stats",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "",
+  "Same three-dot menu on the subreddit home page → \"ModPilot: Stats\" gives a running dashboard of: investigations run, alignment rate between ModPilot's recommendations and your team's actual decisions, total cost, and a carousel of recent actioned cases with their reasoning.",
+  "",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "Honest defaults",
+  "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  "",
+  "Until you configure the form, ModPilot uses: Balanced posture, no custom rules, Global region, Auto tier, app-default Gemini key. The investigation still works — it'll just have less subreddit-specific context to weigh.",
+  "",
+  "Questions or issues? thejasrao262003@gmail.com",
 ].join('\n');
 
 triggers.post('/on-app-upgrade', async (c) => {
@@ -231,6 +284,22 @@ triggers.post('/on-post-report', async (c) => {
 
 // Map Reddit's mod action strings to our 4-action enum. Anything else is
 // observation-only (we still log the payload), not feedback.
+// Automated moderator accounts. Removals by these actors are NOT human
+// judgments and should not count toward a user's violation history:
+//   • AutoModerator — subreddit-configured regex rules; high false-positive
+//     rate. A mod can review and approve afterwards if it was wrong.
+//   • reddit — site-wide spam filter / safety classifier. Also rules-based,
+//     not a human judgment.
+//   • anti-evil-operations — Reddit admin team's automated tooling.
+// Mods can still approve content these flagged; if a real mod confirms the
+// removal, THAT click fires its own onModAction with the mod's name and
+// counts normally.
+const AUTOMATED_MODERATORS: ReadonlySet<string> = new Set([
+  'AutoModerator',
+  'reddit',
+  'anti-evil-operations',
+]);
+
 const REDDIT_ACTION_MAP: Record<string, 'REMOVE' | 'APPROVE' | 'LOCK'> = {
   removelink: 'REMOVE',
   removecomment: 'REMOVE',
@@ -266,27 +335,74 @@ triggers.post('/on-mod-action', async (c) => {
     // account, not the original Reddit author. Bumping here would pollute
     // memory with violations against ourselves.
     const isModpilotPost = await checkIsModpilotPost(targetId);
+    // Skip automated actors: AutoModerator / Reddit spam filter / anti-evil-ops
+    // are rules-based, not human judgments. Counting their removals as
+    // "violations" pollutes user_memory and makes future investigations
+    // anchor on automated false-positives.
+    const actorName = body.moderator?.name ?? '';
+    const isAutomatedActor = AUTOMATED_MODERATORS.has(actorName);
+
     if (isModpilotPost) {
       console.log('modpilot.user_memory.skip_self', {
         sub_id: subId,
         target_id: targetId,
         action: mapped,
       });
-    } else {
+    } else if (isAutomatedActor) {
+      console.log('modpilot.user_memory.skip_automated', {
+        sub_id: subId,
+        target_id: targetId,
+        action: mapped,
+        actor: actorName,
+        reason: 'automated removal — not a human judgment',
+      });
+      // We still record the resolution row so the verdict UI can show
+      // "✓ Resolved · auto-removed by AutoModerator" if the mod investigates
+      // this target later. We just don't count it toward violations.
       try {
-        const { bumpViolation, bumpApproval } = await import('../engine/store/userMemory');
-        if (mapped === 'REMOVE') {
-          await bumpViolation(subId, authorId);
-        } else if (mapped === 'APPROVE') {
-          await bumpApproval(subId, authorId);
-        }
-        console.log('modpilot.user_memory.bumped', {
+        const { recordResolution } = await import('../services/dedup');
+        await recordResolution(targetId, {
+          correlationId: '',
+          modAction: mapped,
+          moderatorName: actorName,
+          rawAction: body.action ?? '',
+          source: 'reddit_native',
+        });
+      } catch {
+        // best-effort
+      }
+    } else {
+      // Dedup: /api/feedback bumps inline when a mod uses ModPilot's UI.
+      // If we see a resolution row for this target, the bump already
+      // happened — don't double-count. Native Reddit-UI removals have no
+      // resolution row, so they still bump here.
+      const alreadyResolved = await redis
+        .hGetAll(`resolution:${targetId}`)
+        .then((row) => !!row?.correlationId || !!row?.correlation_id)
+        .catch(() => false);
+      if (alreadyResolved) {
+        console.log('modpilot.user_memory.skip_dedup', {
           sub_id: subId,
-          author_id: authorId,
+          target_id: targetId,
           action: mapped,
         });
-      } catch (err) {
-        console.error('modpilot.user_memory.bump_failed', err);
+      } else {
+        try {
+          const { bumpViolation, bumpApproval } = await import('../engine/store/userMemory');
+          if (mapped === 'REMOVE') {
+            await bumpViolation(subId, authorId);
+          } else if (mapped === 'APPROVE') {
+            await bumpApproval(subId, authorId);
+          }
+          console.log('modpilot.user_memory.bumped', {
+            sub_id: subId,
+            author_id: authorId,
+            action: mapped,
+            source: 'native_trigger',
+          });
+        } catch (err) {
+          console.error('modpilot.user_memory.bump_failed', err);
+        }
       }
     }
   }

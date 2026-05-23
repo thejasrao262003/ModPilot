@@ -80,6 +80,18 @@ menuConfigure.post('/open', async (c) => {
               helpText:
                 'Force a tier for every investigation. Cold-start ignores FAST overrides.',
             },
+            {
+              name: 'gemini_api_key',
+              label: 'Gemini API key (your subreddit\'s key)',
+              type: 'string',
+              // We show only a masked indicator if a key already exists.
+              // Leaving the field blank on save preserves the existing key.
+              defaultValue: profile.geminiApiKey
+                ? `••••••••${profile.geminiApiKey.slice(-4)} (already set — leave blank to keep)`
+                : '',
+              helpText:
+                'Optional. Paste a Google AI Studio key (starts with "AIza") if you want investigations to use your subreddit\'s Gemini billing. Get one at https://aistudio.google.com/app/apikey. Leave blank to use the app default.',
+            },
           ],
         },
       },
@@ -103,6 +115,7 @@ menuConfigure.post('/submit', async (c) => {
     rules?: string;
     region?: string;
     tier_override?: string | string[];
+    gemini_api_key?: string;
   };
 
   const personality = pickFirst(values.personality, PERSONALITIES, 'balanced');
@@ -110,12 +123,30 @@ menuConfigure.post('/submit', async (c) => {
   const rules = (values.rules ?? '').trim().slice(0, 4000);
   const region = (values.region ?? 'Global').trim().slice(0, 80) || 'Global';
 
-  await redis.hSet(subProfileKey(subId), {
+  // Gemini key handling:
+  //   - If the user pasted a new key starting with "AIza" → save it.
+  //   - If the user left the masked placeholder unchanged (or blank) → preserve
+  //     whatever's already in Redis (don't clobber with empty).
+  //   - To explicitly clear, the user types the literal token "CLEAR".
+  const rawKey = (values.gemini_api_key ?? '').trim();
+  const hashFields: Record<string, string> = {
     personality,
     region,
     rules,
     tier_override: tierOverride,
-  });
+  };
+  let keyUpdate: 'set' | 'cleared' | 'kept' = 'kept';
+  if (rawKey === 'CLEAR') {
+    hashFields.gemini_api_key = '';
+    keyUpdate = 'cleared';
+  } else if (rawKey.startsWith('AIza') && rawKey.length >= 30) {
+    hashFields.gemini_api_key = rawKey;
+    keyUpdate = 'set';
+  }
+  // Else: do not include `gemini_api_key` in the hSet payload → existing
+  // value is preserved (Devvit Redis hSet is a partial-update merge).
+
+  await redis.hSet(subProfileKey(subId), hashFields);
 
   console.log('modpilot.policy.updated', {
     sub_id: subId,
@@ -123,12 +154,16 @@ menuConfigure.post('/submit', async (c) => {
     region,
     tier_override: tierOverride,
     rules_chars: rules.length,
+    key_update: keyUpdate,
   });
+
+  const keyMsg =
+    keyUpdate === 'set' ? ' · API key updated' : keyUpdate === 'cleared' ? ' · API key cleared' : '';
 
   return c.json<UiResponse>(
     {
       showToast: {
-        text: `Saved · ${personality} · tier=${tierOverride} · ${rules.length} chars of rules`,
+        text: `Saved · ${personality} · tier=${tierOverride} · ${rules.length} chars of rules${keyMsg}`,
       },
     },
     200,

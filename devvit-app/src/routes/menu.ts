@@ -12,9 +12,9 @@ import { context, reddit, redis } from '@devvit/web/server';
 
 import { readReportStats, readResolution, relativeAgo } from '../services/dedup';
 import { runInvestigation } from '../engine/pipeline';
+import { resolveGeminiKey } from '../engine/llm/keyResolver';
 import type { Verdict } from '../engine/types';
 import { uncertainty } from '../ui/copy';
-import { GEMINI_API_KEY } from '../config/geminiConfig.local';
 
 export const menu = new Hono();
 
@@ -81,25 +81,40 @@ async function fetchEngineVerdict(args: {
   inputs: VerdictFormInputs;
 }): Promise<Verdict | null> {
   const t0 = Date.now();
-  const apiKey = GEMINI_API_KEY;
-  if (!apiKey) {
+  const resolved = await resolveGeminiKey(args.subredditId);
+  if (resolved.source === 'missing' || !resolved.key) {
     console.warn('modpilot.menu.engine.no_key', {
       correlation_id: args.correlationId,
-      hint: 'fill devvit-app/src/config/geminiConfig.local.ts',
+      hint:
+        'No Gemini key found. Mods can set one via ModPilot: Configure policy. ' +
+        'For local dev, fill devvit-app/src/config/geminiConfig.local.ts.',
     });
     return null;
   }
+  console.log('modpilot.menu.engine.key_source', {
+    correlation_id: args.correlationId,
+    source: resolved.source,
+  });
   try {
     const v = await runInvestigation({
-      geminiApiKey: apiKey,
+      geminiApiKey: resolved.key,
       input: {
         correlationId: args.correlationId,
         subredditId: args.subredditId,
         target: {
           kind: args.inputs.kind,
           id: args.inputs.targetId,
+          // Pass title + body separately. Posts have both; the Reasoner
+          // needs to see the title because that's often where direct
+          // character attacks live ("Rohit is a clown" headline with a
+          // mild body). Comments have no title.
+          title: args.inputs.kind === 'post' ? args.inputs.title : '',
           body: args.inputs.body || args.inputs.title,
-          author: args.inputs.author,
+          // The engine uses target.author as the user_memory key. To keep
+          // it consistent with what onModAction bumps to (t2_<id>), pass
+          // the fullname here. The username is preserved separately for
+          // the verdict hash + UI display.
+          author: args.inputs.authorId || args.inputs.author,
         },
         reporterCount: args.inputs.reportCount,
       },
@@ -144,6 +159,7 @@ function buildVerdictHashFields(args: {
     target_kind: args.inputs.kind,
     target_title: args.inputs.title,
     target_author: args.inputs.author,
+    target_author_id: args.inputs.authorId ?? '',
     recommendation: v.recommendation,
     risk_tier: v.risk_tier,
     tier: v.tier,
@@ -195,6 +211,8 @@ function buildVerdictHashFields(args: {
     alignment_json: JSON.stringify(
       e?.alignment ?? { rate: null, sampleSize: 0, aligned: 0 },
     ),
+    // Stage 1 content findings (Reasoner's "Current Content Assessment" bullets).
+    content_findings_json: JSON.stringify(e?.contentFindings ?? []),
     model_reasoner: e?.modelReasoner ?? 'gemini-2.5-pro',
     model_summarizer: e?.modelSummarizer ?? '',
     cost_usd: String(e?.costUsd ?? 0),
@@ -250,6 +268,7 @@ menu.post('/investigate-post', async (c) => {
       // Reasoner still has *something* content-shaped to read.
       body: post.body ?? post.title ?? '',
       author: post.authorName ?? '',
+      authorId: post.authorId ?? '',
       reportCount,
     });
   } catch (err) {
@@ -275,6 +294,7 @@ menu.post('/investigate-comment', async (c) => {
       title: truncate(comment.body ?? '', 80),
       body: comment.body ?? '',
       author: comment.authorName ?? '',
+      authorId: comment.authorId ?? '',
       reportCount,
     });
   } catch (err) {
@@ -300,7 +320,13 @@ type VerdictFormInputs = {
   targetId: string;
   title: string;
   body: string;
+  /** Display name (e.g. "trendy_guy2003"). Shown in UI. */
   author: string;
+  /** Reddit user fullname (e.g. "t2_ewyhkkhu"). Used as the user_memory
+   *  key so it matches what onModAction's bump uses. CRITICAL — these must
+   *  agree across read and write paths or memory data lives in two
+   *  separate hashes. */
+  authorId: string;
   reportCount: number;
 };
 
@@ -385,14 +411,21 @@ async function submitVerdictPost(
 
   const stored = await redis.hGetAll(`verdict:${correlationId}`);
   const recommendation = stored?.recommendation ?? 'NO_RECOMMENDATION';
-  const pct = Math.round((Number.parseFloat(stored?.calibrated_confidence ?? '0') || 0) * 100);
+  const conf = Number.parseFloat(stored?.calibrated_confidence ?? '0') || 0;
+  const pct = Math.round(conf * 100);
+
+  // Match the in-webview low-conf label. The post TITLE used to read
+  // "APPROVE · 47%" even when the webview correctly showed "Review
+  // Recommended" — that disagreement read as the engine contradicting
+  // itself. Now they agree.
+  const titleVerb = labelForPostTitle(recommendation, conf);
 
   const post = await reddit.submitCustomPost({
     subredditName: subreddit.name,
-    title: `🛡 ModPilot · ${recommendation} · ${pct}% · ${truncate(inputs.title || inputs.targetId, 60)}`,
+    title: `🛡 ModPilot · ${titleVerb} · ${pct}% · ${truncate(inputs.title || inputs.targetId, 60)}`,
     postData: { correlation_id: correlationId },
     textFallback: {
-      text: `ModPilot verdict for ${inputs.targetId}: ${recommendation} (${pct}% confidence).`,
+      text: `ModPilot verdict for ${inputs.targetId}: ${titleVerb} (${pct}% confidence).`,
     },
   });
 
@@ -615,6 +648,22 @@ async function showVerdictForm(
   );
 }
 
+
+/** Label used in the custom-post TITLE. Must agree with the in-webview
+ *  titleFor() in client/main.js — when calibrated confidence is below the
+ *  action threshold (60%), the post title should say REVIEW / FLAGGED
+ *  instead of APPROVE / REMOVE, so the moderator sees consistent framing
+ *  in the mod queue list and inside the verdict UI. */
+function labelForPostTitle(recommendation: string, confidence: number): string {
+  if (recommendation === 'NO_RECOMMENDATION') return 'REVIEW';
+  if (confidence < 0.60) {
+    if (recommendation === 'REMOVE' || recommendation === 'LOCK') return 'REVIEW (rule concern)';
+    if (recommendation === 'APPROVE') return 'REVIEW (likely benign)';
+    if (recommendation === 'ESCALATE') return 'REVIEW (mixed signals)';
+    return 'REVIEW';
+  }
+  return recommendation; // 60%+ — show the firm label
+}
 
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
