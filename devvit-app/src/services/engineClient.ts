@@ -101,9 +101,6 @@ export async function callInvestigate(req: InvestigateRequest, timeoutMs = 8_000
         [HEADER_SIGNATURE]: signature,
         [HEADER_TIMESTAMP]: timestamp,
         [HEADER_CORRELATION]: req.correlation_id,
-        // Skip ngrok's free-tier interstitial — required when the engine
-        // is fronted by ngrok-free during S-1.2 dev.
-        'ngrok-skip-browser-warning': '1',
       },
       body,
     });

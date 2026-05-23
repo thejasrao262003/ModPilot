@@ -21,6 +21,7 @@ If those three land, we win the impression battle. Everything else is in service
 
 ## 2. Judging Criteria Map
 
+
 Each criterion mapped to features that satisfy it, where it's shown in the demo, and what the README emphasizes.
 
 | Criterion | Features | Demo position | README emphasis |

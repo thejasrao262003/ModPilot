@@ -6,6 +6,7 @@
     "entry": "index.cjs"
   },
   "post": {
+    "dir": "dist/client",
     "entrypoints": {
       "default": { "entry": "index.html" }
     }
@@ -14,37 +15,38 @@
     "items": [
       {
         "label": "Investigate with ModPilot",
-        "description": "Force a full investigation on this comment. See docs/09-UX.md §9.1.",
+        "description": "Run a full investigation on this comment.",
         "location": "comment",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/investigate-comment"
       },
       {
         "label": "Investigate with ModPilot",
-        "description": "Force a full investigation on this post.",
+        "description": "Run a full investigation on this post.",
         "location": "post",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/investigate-post"
       },
       {
-        "label": "Summarize this thread",
-        "description": "Arc · escalation · instigator · off-topic. See docs/09-UX.md §9.2.",
-        "location": "post",
+        "label": "ModPilot: Configure policy",
+        "description": "Set the rules, personality, and investigation depth ModPilot uses on this subreddit.",
+        "location": "subreddit",
         "forUserType": "moderator",
-        "endpoint": "/internal/menu/summarize-thread"
+        "endpoint": "/internal/menu-config/open"
       },
       {
-        "label": "Explain ModPilot's last call",
-        "description": "Re-render the most recent verdict for this target.",
-        "location": "comment",
+        "label": "ModPilot: Stats",
+        "description": "Subreddit-wide moderation stats: investigations run, alignment rate, total cost.",
+        "location": "subreddit",
         "forUserType": "moderator",
-        "endpoint": "/internal/menu/explain-last"
+        "endpoint": "/internal/menu-stats/open"
       }
     ]
   },
   "forms": {
     "wipeMemory": "/internal/form/wipe-memory-submit",
-    "verdictView": "/internal/form/verdict-view-submit"
+    "verdictView": "/internal/form/verdict-view-submit",
+    "configurePolicy": "/internal/menu-config/submit"
   },
   "triggers": {
     "onAppInstall": "/internal/triggers/on-app-install",
@@ -77,7 +79,7 @@
     "redis": true,
     "http": {
       "enable": true,
-      "domains": ["26c5-106-51-222-112.ngrok-free.app"]
+      "domains": ["generativelanguage.googleapis.com"]
     }
   }
 }

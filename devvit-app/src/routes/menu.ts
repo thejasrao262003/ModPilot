@@ -8,12 +8,13 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { MenuItemRequest, UiResponse } from '@devvit/web/shared';
-import { reddit, redis } from '@devvit/web/server';
+import { context, reddit, redis } from '@devvit/web/server';
 
 import { readReportStats, readResolution, relativeAgo } from '../services/dedup';
-import { callInvestigate } from '../services/engineClient';
-import type { InvestigateRequest } from '../services/engineClient';
+import { runInvestigation } from '../engine/pipeline';
+import type { Verdict } from '../engine/types';
 import { uncertainty } from '../ui/copy';
+import { GEMINI_API_KEY } from '../config/geminiConfig.local';
 
 export const menu = new Hono();
 
@@ -71,53 +72,147 @@ function selectCanned(targetId: string): CannedVerdict {
   return Math.abs(h) % 5 < 2 ? CANNED_LOW : CANNED_HIGH;
 }
 
-/** S-1.2: call the real engine, project the Verdict to the canned shape for the form. */
+/** ADR-0007: run the investigation in-process inside the Devvit app.
+ *  No external backend, no HMAC, no domain approval — calls Gemini directly.
+ *  Returns the full live Verdict, or a CannedVerdict-shaped fallback on failure. */
 async function fetchEngineVerdict(args: {
   correlationId: string;
   subredditId: string;
   inputs: VerdictFormInputs;
-}): Promise<CannedVerdict | null> {
-  const req: InvestigateRequest = {
-    correlation_id: args.correlationId,
-    subreddit_id: args.subredditId || 't5_unknown',
-    target: {
-      kind: args.inputs.kind,
-      id: args.inputs.targetId,
-      body: args.inputs.title,
-      author: args.inputs.author,
-    },
-    report: {
-      reasons: [],
-      reporter_count: args.inputs.reportCount,
-    },
-    context: {},
-  };
-  const result = await callInvestigate(req);
-  if (!result.ok) {
-    console.warn('modpilot.menu.engine.unavailable', {
+}): Promise<Verdict | null> {
+  const t0 = Date.now();
+  const apiKey = GEMINI_API_KEY;
+  if (!apiKey) {
+    console.warn('modpilot.menu.engine.no_key', {
       correlation_id: args.correlationId,
-      code: result.code,
-      message: result.message,
-      latency_ms: result.latency_ms,
+      hint: 'fill devvit-app/src/config/geminiConfig.local.ts',
     });
     return null;
   }
-  const v = result.verdict;
-  console.log('modpilot.menu.engine.verdict', {
-    correlation_id: v.correlation_id,
-    tier: v.tier,
+  try {
+    const v = await runInvestigation({
+      geminiApiKey: apiKey,
+      input: {
+        correlationId: args.correlationId,
+        subredditId: args.subredditId,
+        target: {
+          kind: args.inputs.kind,
+          id: args.inputs.targetId,
+          body: args.inputs.body || args.inputs.title,
+          author: args.inputs.author,
+        },
+        reporterCount: args.inputs.reportCount,
+      },
+    });
+    console.log('modpilot.menu.engine.verdict', {
+      correlation_id: v.correlationId,
+      tier: v.tier,
+      recommendation: v.recommendation,
+      confidence_pct: Math.round(v.calibratedConfidence * 100),
+      cost_usd: v.costUsd,
+      latency_ms: Date.now() - t0,
+      degraded: v.degraded,
+    });
+    return v;
+  } catch (e) {
+    console.warn('modpilot.menu.engine.unavailable', {
+      correlation_id: args.correlationId,
+      err: e instanceof Error ? e.message : String(e),
+      latency_ms: Date.now() - t0,
+    });
+    return null;
+  }
+}
+
+/** Build a CannedVerdict-shaped object from a real Verdict, for the form fallback. */
+/** Build the Redis hash for `verdict:{correlation_id}`. Centralized so the
+ *  form-fallback and custom-post paths persist identical shapes. snake_case
+ *  on the wire (the engine's Verdict type is camelCase internally). */
+function buildVerdictHashFields(args: {
+  correlationId: string;
+  inputs: VerdictFormInputs;
+  engineResult: Verdict | null;
+  verdictForForm: CannedVerdict;
+  isLowConf: boolean;
+  verdictSource: 'engine' | 'canned';
+}): Record<string, string> {
+  const v = args.verdictForForm;
+  const e = args.engineResult;
+  return {
+    correlation_id: args.correlationId,
+    target_id: args.inputs.targetId,
+    target_kind: args.inputs.kind,
+    target_title: args.inputs.title,
+    target_author: args.inputs.author,
     recommendation: v.recommendation,
-    confidence_pct: Math.round(v.calibrated_confidence * 100),
-    cost_usd: v.cost_usd,
-    latency_ms: result.latency_ms,
-  });
+    risk_tier: v.risk_tier,
+    tier: v.tier,
+    calibrated_confidence: String(v.calibrated_confidence),
+    rationale: v.rationale,
+    is_low_conf: String(args.isLowConf),
+    created_at: new Date().toISOString(),
+    top_evidence_json: JSON.stringify(
+      e
+        ? e.topEvidence.map((row) => ({ id: row.id, summary: row.summary, tool: row.tool }))
+        : v.top_evidence,
+    ),
+    timeline_json: JSON.stringify(
+      (e?.timeline ?? []).map((s) => ({
+        tool: s.tool,
+        verb: s.verb,
+        status: s.status,
+        latency_ms: s.latencyMs,
+        evidence_ids: s.evidenceIds,
+      })),
+    ),
+    confidence_breakdown_json: JSON.stringify(
+      e
+        ? {
+            llm_self_report: e.confidenceBreakdown.llmSelfReport,
+            evidence_convergence: e.confidenceBreakdown.evidenceConvergence,
+            subreddit_accuracy: e.confidenceBreakdown.subredditAccuracy,
+            rule_match_strength: e.confidenceBreakdown.ruleMatchStrength,
+          }
+        : {},
+    ),
+    // Feature 1: priority surfaced to UI + future queue sort.
+    priority_json: JSON.stringify(
+      e?.priority ?? { score: 0, bucket: 'low_risk', headline: 'ℹ️ Low Risk', drivers: [] },
+    ),
+    // Features 2 + 7: author signal (repeat / first-time / positive / neutral).
+    author_signal_json: JSON.stringify(e?.authorSignal ?? null),
+    // Feature 5: escalation detection.
+    escalation_json: JSON.stringify(
+      e?.escalation ?? { level: 'none', headline: null, summary: null, evidenceId: null },
+    ),
+    // Feature 4: confidence explanation panel.
+    confidence_factors_json: JSON.stringify(e?.confidenceFactors ?? []),
+    // Feature 8: key factors panel.
+    key_factors_json: JSON.stringify(e?.keyFactors ?? []),
+    // Feature 6: rule match explainability.
+    rule_matches_json: JSON.stringify(e?.ruleMatches ?? []),
+    // Feature 3: moderator alignment snapshot.
+    alignment_json: JSON.stringify(
+      e?.alignment ?? { rate: null, sampleSize: 0, aligned: 0 },
+    ),
+    model_reasoner: e?.modelReasoner ?? 'gemini-2.5-pro',
+    model_summarizer: e?.modelSummarizer ?? '',
+    cost_usd: String(e?.costUsd ?? 0),
+    latency_ms: String(e?.latencyMs ?? 0),
+    validation_flag: String(e?.validationFlag ?? false),
+    degraded: String(e?.degraded ?? args.verdictSource === 'canned'),
+    cold_start: String(e?.coldStart ?? false),
+  };
+}
+
+function projectVerdictForForm(v: Verdict): CannedVerdict {
   return {
     tier: v.tier,
-    risk_tier: v.risk_tier,
+    risk_tier: v.riskTier,
     recommendation: v.recommendation,
-    calibrated_confidence: v.calibrated_confidence,
+    calibrated_confidence: v.calibratedConfidence,
     rationale: v.rationale,
-    top_evidence: v.top_evidence
+    top_evidence: v.topEvidence
       .slice(0, 3)
       .map((row) => ({ id: row.id, summary: row.summary })),
   };
@@ -147,10 +242,13 @@ menu.post('/investigate-post', async (c) => {
         : post.numberOfReports >= 0
         ? post.numberOfReports
         : 0;
-    return await showVerdictForm(c, {
+    return await showVerdictUI(c, {
       kind: 'post',
       targetId,
       title: post.title ?? '',
+      // Self-post text. Link posts have no body; fall back to title so the
+      // Reasoner still has *something* content-shaped to read.
+      body: post.body ?? post.title ?? '',
       author: post.authorName ?? '',
       reportCount,
     });
@@ -171,10 +269,11 @@ menu.post('/investigate-comment', async (c) => {
     const comment = await reddit.getCommentById(targetId);
     const cached = await readTriggerContext(targetId);
     const reportCount = cached?.num_reports != null ? Number(cached.num_reports) : 0;
-    return await showVerdictForm(c, {
+    return await showVerdictUI(c, {
       kind: 'comment',
       targetId,
       title: truncate(comment.body ?? '', 80),
+      body: comment.body ?? '',
       author: comment.authorName ?? '',
       reportCount,
     });
@@ -200,29 +299,162 @@ type VerdictFormInputs = {
   kind: 'post' | 'comment';
   targetId: string;
   title: string;
+  body: string;
   author: string;
   reportCount: number;
 };
 
 const LOW_CONF_THRESHOLD = 0.6;
 
-async function showVerdictForm(c: Context, inputs: VerdictFormInputs): Promise<Response> {
-  // Reuse the dedupe correlation_id if the target was triggered into the
-  // pipeline by a report; otherwise mint a one-off for menu-initiated
-  // investigations. Keeps engine-side joins clean across both flows.
+/** Run the investigation, persist the verdict, then try to open the rich
+ *  custom-post webview. If submitPost fails (older Devvit asset-bundling
+ *  issue, missing subreddit context, etc.) fall back to the form modal. */
+async function showVerdictUI(c: Context, inputs: VerdictFormInputs): Promise<Response> {
+  // Compute correlation_id ONCE — bugfix for the dual-ID race where
+  // runAndPersistVerdict and submitVerdictPost each minted a Date.now()-based
+  // id and ended up storing the verdict under one and mapping the post to the
+  // other, leaving the webview unable to find the verdict.
   const cached = await readTriggerContext(inputs.targetId);
   const correlationId =
     cached?.correlation_id ?? `inv-${Date.now()}-${inputs.targetId.slice(3, 10)}`;
+
+  // Step 1: run the engine + persist the verdict.
+  await runAndPersistVerdict(correlationId, inputs);
+
+  // Step 2: try the rich UI (custom post + navigateTo).
+  try {
+    const postResp = await submitVerdictPost(c, correlationId, inputs);
+    if (postResp) return postResp;
+  } catch (err) {
+    console.warn('modpilot.menu.custom_post.failed', {
+      target_id: inputs.targetId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // Step 3: fall back to the form modal.
+  return await showVerdictForm(c, inputs, correlationId);
+}
+
+async function runAndPersistVerdict(
+  correlationId: string,
+  inputs: VerdictFormInputs,
+): Promise<string> {
+  // If we already persisted this correlation in the same playtest, skip the LLM call.
+  const existing = await redis.hGetAll(`verdict:${correlationId}`);
+  if (existing?.correlation_id) {
+    return correlationId;
+  }
+
+  const cached = await readTriggerContext(inputs.targetId);
+  const engineResult = await fetchEngineVerdict({
+    correlationId,
+    // context.subredditId is the authoritative current sub on a menu click.
+    // cached?.subreddit_id is only populated if a report trigger ran first.
+    subredditId: context.subredditId ?? cached?.subreddit_id ?? '',
+    inputs,
+  });
+  const verdict = engineResult
+    ? projectVerdictForForm(engineResult)
+    : selectCanned(inputs.targetId);
+  const isLowConf = verdict.calibrated_confidence < LOW_CONF_THRESHOLD;
+  const verdictSource: 'engine' | 'canned' = engineResult ? 'engine' : 'canned';
+
+  await redis.hSet(
+    `verdict:${correlationId}`,
+    buildVerdictHashFields({
+      correlationId,
+      inputs,
+      engineResult,
+      verdictForForm: verdict,
+      isLowConf,
+      verdictSource,
+    }),
+  );
+  await redis.expire(`verdict:${correlationId}`, 60 * 60 * 24 * 7);
+  return correlationId;
+}
+
+async function submitVerdictPost(
+  c: Context,
+  correlationId: string,
+  inputs: VerdictFormInputs,
+): Promise<Response | null> {
+  const subreddit = await reddit.getCurrentSubreddit();
+  if (!subreddit?.name) return null;
+
+  const stored = await redis.hGetAll(`verdict:${correlationId}`);
+  const recommendation = stored?.recommendation ?? 'NO_RECOMMENDATION';
+  const pct = Math.round((Number.parseFloat(stored?.calibrated_confidence ?? '0') || 0) * 100);
+
+  const post = await reddit.submitCustomPost({
+    subredditName: subreddit.name,
+    title: `🛡 ModPilot · ${recommendation} · ${pct}% · ${truncate(inputs.title || inputs.targetId, 60)}`,
+    postData: { correlation_id: correlationId },
+    textFallback: {
+      text: `ModPilot verdict for ${inputs.targetId}: ${recommendation} (${pct}% confidence).`,
+    },
+  });
+
+  // Visibility: ModPilot verdict posts are an internal mod tool, not feed content.
+  // Auto-remove so the post lands in the mod queue (visible only to mods).
+  // The webview still works when mods open it from the queue; non-mods can't
+  // see it in their feed or open it.
+  try {
+    await post.remove();
+  } catch (err) {
+    console.warn('modpilot.menu.custom_post.auto_remove_failed', {
+      post_id: post.id,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // Belt-and-suspenders: map post id → correlation_id in Redis so /api/verdict
+  // can rehydrate even if context.postData() isn't available in the webview.
+  await redis.set(`post_correlation:${post.id}`, correlationId, {
+    expiration: new Date(Date.now() + 60 * 60 * 24 * 7 * 1000),
+  });
+
+  console.log('modpilot.menu.custom_post.created', {
+    correlation_id: correlationId,
+    post_id: post.id,
+    permalink: post.permalink,
+  });
+
+  return c.json<UiResponse>(
+    {
+      navigateTo: `https://reddit.com${post.permalink}`,
+    },
+    200,
+  );
+}
+
+async function showVerdictForm(
+  c: Context,
+  inputs: VerdictFormInputs,
+  correlationIdIn?: string,
+): Promise<Response> {
+  // Reuse the dedupe correlation_id if the target was triggered into the
+  // pipeline by a report; otherwise mint a one-off for menu-initiated
+  // investigations. Caller (showVerdictUI) passes correlationIdIn to keep
+  // form fallback and custom-post path on the same id.
+  const cached = await readTriggerContext(inputs.targetId);
+  const correlationId =
+    correlationIdIn ?? cached?.correlation_id ?? `inv-${Date.now()}-${inputs.targetId.slice(3, 10)}`;
 
   // S-1.2: try the real engine first; fall back to a canned verdict only
   // if the engine is unreachable. Per Specs §13.1 graceful degradation —
   // the moderator always sees *something*, never an error.
   const engineResult = await fetchEngineVerdict({
     correlationId,
-    subredditId: cached?.subreddit_id ?? '',
+    // context.subredditId is the authoritative current sub on a menu click.
+    // cached?.subreddit_id is only populated if a report trigger ran first.
+    subredditId: context.subredditId ?? cached?.subreddit_id ?? '',
     inputs,
   });
-  const verdict = engineResult ?? selectCanned(inputs.targetId);
+  const verdict = engineResult
+    ? projectVerdictForForm(engineResult)
+    : selectCanned(inputs.targetId);
   const verdictSource: 'engine' | 'canned' = engineResult ? 'engine' : 'canned';
 
   const pct = Math.round(verdict.calibrated_confidence * 100);
@@ -236,8 +468,9 @@ async function showVerdictForm(c: Context, inputs: VerdictFormInputs): Promise<R
   const reReportField = buildReReportField(reportStats);
   const resolvedField = buildResolvedField(resolution);
 
-  // Persist the canned verdict so S-1.6 feedback can join on correlation_id,
-  // and so a future custom-post render can read it from KV.
+  // Persist the verdict so the custom-post webview can rehydrate it.
+  // Includes the full top_evidence + timeline + confidence_breakdown as JSON
+  // so /api/verdict can return everything without a second engine call.
   await redis.hSet(`verdict:${correlationId}`, {
     correlation_id: correlationId,
     target_id: inputs.targetId,
@@ -246,10 +479,45 @@ async function showVerdictForm(c: Context, inputs: VerdictFormInputs): Promise<R
     target_author: inputs.author,
     recommendation: verdict.recommendation,
     risk_tier: verdict.risk_tier,
+    tier: verdict.tier,
     calibrated_confidence: String(verdict.calibrated_confidence),
     rationale: verdict.rationale,
     is_low_conf: String(isLowConf),
     created_at: new Date().toISOString(),
+    // Rich shape for the webview — JSON-encoded.
+    // Wire-format (snake_case) so the client's main.js can render without
+    // a per-field mapping. The engine's Verdict type is camelCase internally.
+    top_evidence_json: JSON.stringify(
+      engineResult
+        ? engineResult.topEvidence.map((e) => ({ id: e.id, summary: e.summary, tool: e.tool }))
+        : verdict.top_evidence,
+    ),
+    timeline_json: JSON.stringify(
+      (engineResult?.timeline ?? []).map((s) => ({
+        tool: s.tool,
+        verb: s.verb,
+        status: s.status,
+        latency_ms: s.latencyMs,
+        evidence_ids: s.evidenceIds,
+      })),
+    ),
+    confidence_breakdown_json: JSON.stringify(
+      engineResult
+        ? {
+            llm_self_report: engineResult.confidenceBreakdown.llmSelfReport,
+            evidence_convergence: engineResult.confidenceBreakdown.evidenceConvergence,
+            subreddit_accuracy: engineResult.confidenceBreakdown.subredditAccuracy,
+            rule_match_strength: engineResult.confidenceBreakdown.ruleMatchStrength,
+          }
+        : {},
+    ),
+    model_reasoner: engineResult?.modelReasoner ?? 'gemini-2.5-pro',
+    model_summarizer: engineResult?.modelSummarizer ?? '',
+    cost_usd: String(engineResult?.costUsd ?? 0),
+    latency_ms: String(engineResult?.latencyMs ?? 0),
+    validation_flag: String(engineResult?.validationFlag ?? false),
+    degraded: String(engineResult?.degraded ?? verdictSource === 'canned'),
+    cold_start: String(engineResult?.coldStart ?? false),
   });
   await redis.expire(`verdict:${correlationId}`, 60 * 60 * 24 * 7);
 
@@ -317,27 +585,17 @@ async function showVerdictForm(c: Context, inputs: VerdictFormInputs): Promise<R
               defaultValue: `${inputs.title}  —  by u/${inputs.author || 'unknown'}`,
               disabled: true,
             },
-            {
-              name: 'evidence_1',
-              label: `Evidence [${verdict.top_evidence[0]!.id}]`,
-              type: 'string',
-              defaultValue: verdict.top_evidence[0]!.summary,
+            // Evidence rows — render only what the verdict actually produced.
+            // The degraded fallback path (Reasoner failed twice) can return
+            // fewer than 3 rows; older code unconditionally indexed [0..2]
+            // and crashed with `Cannot read properties of undefined`.
+            ...verdict.top_evidence.slice(0, 3).map((ev, i) => ({
+              name: `evidence_${i + 1}`,
+              label: `Evidence [${ev.id}]`,
+              type: 'string' as const,
+              defaultValue: ev.summary,
               disabled: true,
-            },
-            {
-              name: 'evidence_2',
-              label: `Evidence [${verdict.top_evidence[1]!.id}]`,
-              type: 'string',
-              defaultValue: verdict.top_evidence[1]!.summary,
-              disabled: true,
-            },
-            {
-              name: 'evidence_3',
-              label: `Evidence [${verdict.top_evidence[2]!.id}]`,
-              type: 'string',
-              defaultValue: verdict.top_evidence[2]!.summary,
-              disabled: true,
-            },
+            })),
             {
               name: 'rationale',
               label: isLowConf ? 'What I looked at' : 'Reasoning',

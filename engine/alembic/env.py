@@ -27,7 +27,9 @@ target_metadata = Base.metadata
 # needs a sync driver — swap to psycopg.
 settings = get_settings()
 runtime_url = settings.database_url.replace("+asyncpg", "+psycopg")
-config.set_main_option("sqlalchemy.url", runtime_url)
+# configparser treats `%` as interpolation char; URL-encoded passwords (e.g. `%24` for `$`)
+# break set_main_option unless we escape `%` → `%%`.
+config.set_main_option("sqlalchemy.url", runtime_url.replace("%", "%%"))
 
 
 def run_migrations_offline() -> None:

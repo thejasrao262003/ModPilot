@@ -570,3 +570,215 @@ body::before {
   .masthead { grid-template-columns: 1fr; gap: 12px; }
   .masthead-meta { padding-left: 0; border-left: none; }
 }
+
+/* ── Features 1–8 panels ─────────────────────────────────────────────── */
+
+.v-header-pills {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.priority-pill {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--rule-hair);
+  background: var(--paper);
+}
+.priority-pill[data-bucket="urgent"] { background: #b91c1c; color: white; border-color: #991b1b; }
+.priority-pill[data-bucket="review_soon"] { background: #fde68a; color: #78350f; border-color: #d97706; }
+.priority-pill[data-bucket="low_risk"] { background: #e5f3ee; color: #15663d; border-color: #15663d; }
+
+.escalation-banner {
+  margin: 12px 0 0 0;
+  padding: 10px 14px;
+  border-left: 3px solid #b91c1c;
+  background: #fef2f2;
+  color: #7f1d1d;
+  font-size: 13px;
+  border-radius: 4px;
+}
+.escalation-banner[data-level="mild"] { border-left-color: #d97706; background: #fff7ed; color: #78350f; }
+.escalation-banner[data-level="moderate"] { border-left-color: #ea580c; background: #fff1e8; color: #7c2d12; }
+.escalation-banner .esc-summary { color: inherit; opacity: 0.85; }
+
+.author-signal {
+  margin: 10px 0 0 0;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  border: 1px solid var(--rule-hair);
+}
+.author-signal[data-kind="repeat"] { background: #fef2f2; border-color: #fecaca; color: #7f1d1d; }
+.author-signal[data-kind="positive"] { background: #ecfdf5; border-color: #a7f3d0; color: #14532d; }
+.author-signal[data-kind="first_time"] { background: #eff6ff; border-color: #bfdbfe; color: #1e3a8a; }
+.author-signal[data-kind="neutral"] { background: var(--paper); }
+.author-signal .as-headline { font-weight: 600; }
+.author-signal .as-detail { font-family: var(--font-mono); font-size: 11px; color: inherit; opacity: 0.85; }
+
+.key-factors {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.kf-row {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  align-items: center;
+  padding: 8px 12px;
+  border-left: 3px solid var(--ink-soft);
+  background: var(--paper);
+  border-radius: 4px;
+  font-size: 13px;
+}
+.kf-row.kf-high { border-left-color: #b91c1c; }
+.kf-row.kf-medium { border-left-color: #d97706; }
+.kf-row.kf-low { border-left-color: var(--ink-soft); }
+.kf-row.kf-positive .kf-label::before { content: '✓ '; color: #15663d; }
+.kf-row.kf-negative .kf-label::before { content: ''; }
+.kf-impact {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+}
+
+.rule-matches {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rm-row {
+  padding: 10px 14px;
+  border: 1px solid var(--rule-hair);
+  border-radius: 4px;
+  background: var(--paper);
+}
+.rm-row.rm-high { border-left: 3px solid #b91c1c; }
+.rm-row.rm-medium { border-left: 3px solid #d97706; }
+.rm-row.rm-low { border-left: 3px solid var(--ink-soft); }
+.rm-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.rm-rule { font-weight: 600; }
+.rm-score { font-family: var(--font-mono); font-size: 11px; color: var(--ink-soft); }
+.rm-evidence { margin-top: 6px; }
+.rm-noev { font-family: var(--font-mono); font-size: 11px; color: var(--ink-soft); font-style: italic; }
+
+.conf-factors {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cf-row {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  align-items: baseline;
+  padding: 6px 12px;
+  border-left: 2px solid var(--ink-soft);
+  font-size: 13px;
+}
+.cf-row.cf-up { border-left-color: #15663d; background: #f0fdf4; }
+.cf-row.cf-down { border-left-color: #b91c1c; background: #fef2f2; }
+.cf-arrow { font-family: var(--font-mono); font-size: 11px; color: var(--ink-soft); }
+.cf-reason { color: var(--ink); }
+
+.alignment-line {
+  width: 100%;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: none;
+  color: var(--ink-soft);
+}
+
+/* ── Feature 9: Response Generator modal ─────────────────────────────── */
+.response-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 100;
+}
+.rm-card {
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  max-width: 600px;
+  width: 100%;
+  padding: 24px;
+  border-radius: 6px;
+  max-height: 88vh;
+  overflow-y: auto;
+}
+.rm-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 18px;
+}
+.rm-card-head h3 { margin: 0; font-family: var(--font-display, serif); }
+.rm-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  color: var(--ink-soft);
+}
+.rm-label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  margin-top: 12px;
+  margin-bottom: 4px;
+}
+.rm-hint {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin: 4px 0 8px 0;
+}
+#response-modal textarea,
+#response-modal input[type="text"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--rule-hair);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: white;
+  resize: vertical;
+}
+.rm-step-buttons {
+  margin-top: 14px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.rm-status {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.rm-status[data-kind="pending"] { background: #fef9c3; color: #713f12; }
+.rm-status[data-kind="success"] { background: #ecfdf5; color: #065f46; }
+.rm-status[data-kind="error"] { background: #fef2f2; color: #991b1b; }

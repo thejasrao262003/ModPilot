@@ -6,3 +6,7 @@ dist
 # Per-dev tunnel + secret values. Use src/services/engineConfig.example.ts
 # as the template; copy to engineConfig.local.ts and fill in.
 src/services/engineConfig.local.ts
+
+# Gemini API key for the in-process engine (ADR-0007). Devvit Web 0.12.x
+# can't store app-level secrets, so we bake the key into a gitignored file.
+src/config/geminiConfig.local.ts

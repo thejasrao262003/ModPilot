@@ -24,16 +24,18 @@ export default defineConfig([
       '@typescript-eslint/no-unused-vars': ['off'],
       'no-unused-vars': ['off'],
       // === Layer purity — invariant I-8 ===
-      // devvit-app/ must never import from engine/ or eval/.
-      // See docs/Specs.md §4.2 and docs/adr/0001-devvit-plus-external-backend.md.
+      // devvit-app/ must never import from the root engine/ or eval/ trees
+      // (Python reference impl + eval harness). Per ADR-0007, the in-process
+      // TypeScript engine lives at devvit-app/src/engine/ and IS allowed.
+      // See docs/Specs.md §4.2.
       'no-restricted-imports': [
         'error',
         {
           patterns: [
             {
-              group: ['**/engine/**', '../engine/**', '../../engine/**'],
+              group: ['../../engine/**', '../../../engine/**'],
               message:
-                'Layer violation: devvit-app cannot import from engine/. See docs/Specs.md §4.2.',
+                'Layer violation: devvit-app cannot import from the root engine/ (Python reference impl). Use devvit-app/src/engine/ instead. See ADR-0007.',
             },
             {
               group: ['**/eval/**', '../eval/**', '../../eval/**'],

@@ -161,37 +161,262 @@ function escapeHtml(s) {
     .replace(/'/g, '&#39;');
 }
 
-async function onAction(label, verdict) {
-  const buttons = document.querySelectorAll('#actions .btn');
-  buttons.forEach((b) => { b.disabled = true; });
-  const status = ensureStatusEl();
-  status.textContent = `Recording ${label.toLowerCase()}…`;
-  status.className = 'action-status pending';
-  try {
-    const res = await fetch('/api/feedback', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        correlation_id: verdict.correlation_id,
-        mod_action: label.toUpperCase(),
-        recommendation: verdict.recommendation,
-        source: 'verdict_card',
-        target_id: verdict.target_id || verdict.target?.id || '',
-      }),
-    });
-    const body = await res.json();
-    if (!res.ok || !body.ok) throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
-    const aligned = body.data.aligned === 'true';
-    status.textContent = aligned
-      ? `${label} recorded · aligned with ModPilot ✓`
-      : `${label} recorded · overrode ModPilot's ${verdict.recommendation.toLowerCase()}`;
-    status.className = 'action-status success';
-  } catch (err) {
-    console.error('modpilot.feedback.failed', err);
-    status.textContent = `Failed to record: ${String(err)}`;
-    status.className = 'action-status error';
-    buttons.forEach((b) => { b.disabled = false; });
+// ── Feature 1: priority pill in the header ──────────────────────────────
+function renderPriorityPill(priority) {
+  const el = document.getElementById('priority-pill');
+  if (!priority || typeof priority.score !== 'number') return;
+  el.hidden = false;
+  el.dataset.bucket = priority.bucket || 'low_risk';
+  el.textContent = `${priority.headline || 'ℹ️ Low Risk'} · ${priority.score}`;
+}
+
+// ── Feature 5: escalation banner ─────────────────────────────────────────
+function renderEscalationBanner(escalation) {
+  const el = document.getElementById('escalation-banner');
+  if (!escalation || !escalation.headline || escalation.level === 'none') return;
+  el.hidden = false;
+  el.dataset.level = escalation.level;
+  const summary = escalation.summary ? `<span class="esc-summary"> — ${escapeHtml(escalation.summary)}</span>` : '';
+  el.innerHTML = `<strong>${escapeHtml(escalation.headline)}</strong>${summary}`;
+}
+
+// ── Features 2 + 7: author signal (repeat / first-time / positive) ──────
+function renderAuthorSignal(signal) {
+  const el = document.getElementById('author-signal');
+  if (!signal || !signal.headline) return;
+  el.hidden = false;
+  el.dataset.kind = signal.kind || 'neutral';
+  el.innerHTML = `
+    <span class="as-headline">${escapeHtml(signal.headline)}</span>
+    <span class="as-detail">${escapeHtml(signal.detail || '')}</span>
+  `;
+}
+
+// ── Feature 4: confidence explanation panel ─────────────────────────────
+function renderConfidenceFactors(factors) {
+  const list = document.getElementById('conf-factors-list');
+  if (!Array.isArray(factors) || factors.length === 0) return;
+  document.getElementById('confidence-explain-section').hidden = false;
+  list.innerHTML = '';
+  for (const f of factors) {
+    const li = document.createElement('li');
+    li.className = `cf-row cf-${f.direction === 'up' ? 'up' : 'down'}`;
+    const arrow = f.direction === 'up' ? '▲ increased' : '▼ reduced';
+    li.innerHTML = `<span class="cf-arrow">${arrow}</span><span class="cf-reason">${escapeHtml(f.reason)}</span>`;
+    list.appendChild(li);
   }
+}
+
+// ── Feature 8: key factors panel ────────────────────────────────────────
+function renderKeyFactors(factors) {
+  const list = document.getElementById('key-factors-list');
+  if (!Array.isArray(factors) || factors.length === 0) return;
+  document.getElementById('key-factors-section').hidden = false;
+  list.innerHTML = '';
+  for (const f of factors) {
+    const li = document.createElement('li');
+    li.className = `kf-row kf-${f.impact} kf-${f.direction}`;
+    li.innerHTML = `
+      <span class="kf-impact">${f.impact.toUpperCase()}</span>
+      <span class="kf-label">${escapeHtml(f.label)}</span>
+    `;
+    list.appendChild(li);
+  }
+}
+
+// ── Feature 6: rule match explainability ────────────────────────────────
+function renderRuleMatches(matches) {
+  const list = document.getElementById('rule-matches-list');
+  if (!Array.isArray(matches) || matches.length === 0) return;
+  document.getElementById('rule-matches-section').hidden = false;
+  list.innerHTML = '';
+  for (const m of matches) {
+    const li = document.createElement('li');
+    li.className = `rm-row rm-${m.score}`;
+    const evChips = (Array.isArray(m.evidenceIds) ? m.evidenceIds : [])
+      .map((id) => `<a class="ev-chip" data-link="${escapeHtml(id)}">${escapeHtml(id.replace('-', '·'))}</a>`)
+      .join(' ');
+    li.innerHTML = `
+      <div class="rm-head">
+        <span class="rm-rule">${escapeHtml(m.rule)}</span>
+        <span class="rm-score">Score: ${m.score}</span>
+      </div>
+      <div class="rm-evidence">${evChips || '<span class="rm-noev">no cited evidence rows</span>'}</div>
+    `;
+    list.appendChild(li);
+  }
+}
+
+// ── Feature 3: alignment line in footer ─────────────────────────────────
+function renderAlignmentLine(alignment) {
+  const el = document.getElementById('alignment-line');
+  if (!alignment || typeof alignment.sampleSize !== 'number') return;
+  if (alignment.rate === null || alignment.rate === undefined) return;
+  const pct = Math.round(alignment.rate * 100);
+  el.hidden = false;
+  el.textContent = `ModPilot and your mod team agree ${pct}% of the time (${alignment.aligned}/${alignment.sampleSize} mod actions).`;
+}
+
+// ── Feature 9 ─────────────────────────────────────────────────────────
+// Click an action button → open the Response modal (mod can skip, generate
+// a draft, edit it, and decide whether to actually send a reply).
+function onAction(label, verdict) {
+  openResponseModal(label, verdict);
+}
+
+async function postFeedback(label, verdict) {
+  const res = await fetch('/api/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      correlation_id: verdict.correlation_id,
+      mod_action: label.toUpperCase(),
+      recommendation: verdict.recommendation,
+      source: 'verdict_card',
+      target_id: verdict.target_id || verdict.target?.id || '',
+    }),
+  });
+  const body = await res.json();
+  if (!res.ok || !body.ok) throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+  return body.data;
+}
+
+async function postDraft(label, verdict, instructions) {
+  const res = await fetch('/api/draft-response', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      correlation_id: verdict.correlation_id,
+      mod_action: label.toUpperCase(),
+      moderator_instructions: instructions || '',
+    }),
+  });
+  const body = await res.json();
+  if (!res.ok || !body.ok) throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+  return body.data;
+}
+
+async function postSendReply(verdict, draftBody) {
+  const res = await fetch('/api/send-response', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      correlation_id: verdict.correlation_id,
+      target_id: verdict.target_id || verdict.target?.id || '',
+      body: draftBody,
+    }),
+  });
+  const body = await res.json();
+  if (!res.ok || !body.ok) throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+  return body.data;
+}
+
+let _modalState = null;
+
+function openResponseModal(label, verdict) {
+  _modalState = { label, verdict };
+  const modal = document.getElementById('response-modal');
+  modal.hidden = false;
+  document.getElementById('rm-action-headline').textContent = `${label} · draft a response (optional)`;
+  document.getElementById('rm-instructions').value = '';
+  document.getElementById('rm-step-instructions').hidden = false;
+  document.getElementById('rm-step-draft').hidden = true;
+  document.getElementById('rm-status').hidden = true;
+}
+
+function closeResponseModal() {
+  const modal = document.getElementById('response-modal');
+  modal.hidden = true;
+  _modalState = null;
+}
+
+function setModalStatus(text, kind) {
+  const el = document.getElementById('rm-status');
+  el.hidden = false;
+  el.textContent = text;
+  el.dataset.kind = kind || 'pending';
+}
+
+function wireResponseModal() {
+  document.getElementById('rm-close')?.addEventListener('click', closeResponseModal);
+
+  document.getElementById('rm-skip')?.addEventListener('click', async () => {
+    if (!_modalState) return;
+    const { label, verdict } = _modalState;
+    setModalStatus(`Recording ${label.toLowerCase()}…`, 'pending');
+    try {
+      const data = await postFeedback(label, verdict);
+      const aligned = data.aligned === 'true';
+      setModalStatus(
+        aligned
+          ? `${label} applied · aligned with ModPilot ✓`
+          : `${label} applied · you overrode ModPilot's ${verdict.recommendation.toLowerCase()}`,
+        'success',
+      );
+      disableActionButtons();
+      setTimeout(closeResponseModal, 1500);
+    } catch (err) {
+      setModalStatus(`Failed: ${String(err)}`, 'error');
+    }
+  });
+
+  document.getElementById('rm-generate')?.addEventListener('click', () => generateDraft());
+  document.getElementById('rm-regenerate')?.addEventListener('click', () => generateDraft());
+
+  document.getElementById('rm-act-only')?.addEventListener('click', async () => {
+    if (!_modalState) return;
+    const { label, verdict } = _modalState;
+    setModalStatus(`Taking action without sending reply…`, 'pending');
+    try {
+      await postFeedback(label, verdict);
+      setModalStatus(`${label} applied · no reply sent`, 'success');
+      disableActionButtons();
+      setTimeout(closeResponseModal, 1500);
+    } catch (err) {
+      setModalStatus(`Failed: ${String(err)}`, 'error');
+    }
+  });
+
+  document.getElementById('rm-send')?.addEventListener('click', async () => {
+    if (!_modalState) return;
+    const { label, verdict } = _modalState;
+    const body = document.getElementById('rm-body').value.trim();
+    if (!body) {
+      setModalStatus('Draft is empty. Add text before sending.', 'error');
+      return;
+    }
+    setModalStatus(`Taking action and sending reply…`, 'pending');
+    try {
+      await postFeedback(label, verdict);
+      const sendData = await postSendReply(verdict, body);
+      setModalStatus(`${label} applied · reply sent (${sendData.reply_id})`, 'success');
+      disableActionButtons();
+      setTimeout(closeResponseModal, 2000);
+    } catch (err) {
+      setModalStatus(`Send failed: ${String(err)}`, 'error');
+    }
+  });
+}
+
+async function generateDraft() {
+  if (!_modalState) return;
+  const { label, verdict } = _modalState;
+  const instructions = document.getElementById('rm-instructions').value;
+  setModalStatus('Generating draft…', 'pending');
+  try {
+    const draft = await postDraft(label, verdict, instructions);
+    document.getElementById('rm-subject').value = draft.subject || '';
+    document.getElementById('rm-body').value = draft.body || '';
+    document.getElementById('rm-step-instructions').hidden = true;
+    document.getElementById('rm-step-draft').hidden = false;
+    setModalStatus(`Draft ready (${draft.model || 'gemini'} · $${(draft.costUsd || 0).toFixed(4)}) — edit before sending.`, 'success');
+  } catch (err) {
+    setModalStatus(`Draft generation failed: ${String(err)}`, 'error');
+  }
+}
+
+function disableActionButtons() {
+  document.querySelectorAll('#actions .btn').forEach((b) => { b.disabled = true; });
 }
 
 function ensureStatusEl() {
@@ -208,8 +433,10 @@ function ensureStatusEl() {
 async function load() {
   const root = document.getElementById('root');
   try {
-    const correlationId = new URL(location.href).searchParams.get('c') ?? 'canned';
-    const res = await fetch(`/api/verdict/canned?c=${encodeURIComponent(correlationId)}`, {
+    // /api/verdict (no params) — server resolves correlation_id from
+    // context.postId → post_correlation:{postId} Redis mapping that
+    // menu.ts writes when it creates the custom post.
+    const res = await fetch('/api/verdict', {
       headers: { 'Accept': 'application/json' },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -268,6 +495,15 @@ function render(verdict, target) {
     m.textContent = "I found the following but I'm not confident enough to recommend an action. Your judgment matters here.";
   }
 
+  // ── New panels (Features 1, 2, 4, 5, 6, 7, 8) ──
+  renderPriorityPill(verdict.priority);
+  renderEscalationBanner(verdict.escalation);
+  renderAuthorSignal(verdict.author_signal);
+  renderConfidenceFactors(verdict.confidence_factors);
+  renderKeyFactors(verdict.key_factors);
+  renderRuleMatches(verdict.rule_matches);
+  renderAlignmentLine(verdict.alignment);
+
   // Evidence + actions
   renderEvidence(verdict.top_evidence);
   renderActions(verdict);
@@ -288,3 +524,4 @@ function render(verdict, target) {
 }
 
 load();
+wireResponseModal();

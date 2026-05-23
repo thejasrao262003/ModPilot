@@ -33,8 +33,17 @@
             <div class="v-target" id="v-target">—</div>
             <h3 class="v-title" id="v-title">—</h3>
           </div>
-          <span class="risk-pill" id="risk-pill">—</span>
+          <div class="v-header-pills">
+            <span class="priority-pill" id="priority-pill" hidden>—</span>
+            <span class="risk-pill" id="risk-pill">—</span>
+          </div>
         </div>
+
+        <!-- Feature 5: escalation banner -->
+        <div class="escalation-banner" id="escalation-banner" hidden></div>
+
+        <!-- Features 2 + 7: author signal -->
+        <div class="author-signal" id="author-signal" hidden></div>
 
         <div class="conf-row">
           <span class="conf-label">Confidence</span>
@@ -57,6 +66,30 @@
           <span class="expand" id="expand-toggle">View reasoning ▾</span>
         </div>
       </article>
+    </section>
+
+    <!-- Feature 8: Key Factors panel -->
+    <section id="key-factors-section" class="section" hidden>
+      <div class="section-head">
+        <div class="section-title">What most influenced this</div>
+      </div>
+      <ul class="key-factors" id="key-factors-list"></ul>
+    </section>
+
+    <!-- Feature 6: Rule Match Explainability -->
+    <section id="rule-matches-section" class="section" hidden>
+      <div class="section-head">
+        <div class="section-title">Potential rule matches</div>
+      </div>
+      <ul class="rule-matches" id="rule-matches-list"></ul>
+    </section>
+
+    <!-- Feature 4: Confidence Explanation Panel -->
+    <section id="confidence-explain-section" class="section" hidden>
+      <div class="section-head">
+        <div class="section-title">Why confidence is what it is</div>
+      </div>
+      <ul class="conf-factors" id="conf-factors-list"></ul>
     </section>
 
     <!-- Investigation Timeline -->
@@ -92,10 +125,42 @@
       <p>ModPilot couldn't load this verdict. <button id="retry-btn">Try again</button></p>
     </section>
 
+    <!-- Feature 9: Moderator Response Generator modal -->
+    <div id="response-modal" class="response-modal" hidden>
+      <div class="rm-card">
+        <header class="rm-card-head">
+          <h3 id="rm-action-headline">Take action</h3>
+          <button id="rm-close" class="rm-close" aria-label="Close">×</button>
+        </header>
+        <div class="rm-step" id="rm-step-instructions">
+          <label class="rm-label" for="rm-instructions">Optional guidance for the draft</label>
+          <p class="rm-hint">Examples: "Don't penalize this user this time" · "Explain Rule 3 in detail" · "Warn but don't sound harsh"</p>
+          <textarea id="rm-instructions" rows="3" placeholder="(leave blank for a default draft)"></textarea>
+          <div class="rm-step-buttons">
+            <button id="rm-skip" class="btn">Skip · just take action</button>
+            <button id="rm-generate" class="btn is-primary">Generate draft</button>
+          </div>
+        </div>
+        <div class="rm-step" id="rm-step-draft" hidden>
+          <label class="rm-label" for="rm-subject">Subject</label>
+          <input id="rm-subject" type="text" />
+          <label class="rm-label" for="rm-body">Draft (edit before sending)</label>
+          <textarea id="rm-body" rows="8"></textarea>
+          <div class="rm-step-buttons">
+            <button id="rm-regenerate" class="btn">↻ Regenerate</button>
+            <button id="rm-send" class="btn is-primary">Take action + send reply</button>
+            <button id="rm-act-only" class="btn">Take action without replying</button>
+          </div>
+        </div>
+        <div class="rm-status" id="rm-status" hidden></div>
+      </div>
+    </div>
+
     <!-- Colophon -->
     <footer class="colophon">
       <div>ModPilot · case-file edition · <strong>S-1.4 + S-1.5</strong></div>
       <div>Human-in-the-loop · evidence-first · every claim cites</div>
+      <div class="alignment-line" id="alignment-line" hidden></div>
     </footer>
   </main>
 
